@@ -260,7 +260,8 @@ void allCalendarPeriodsAggregateTheirFullRange() {
 
 void daylightSavingUsesLocalCalendarBoundaries() {
 #if defined(_WIN32)
-    require(_putenv_s("TZ", "EST5EDT,M3.2.0/2,M11.1.0/2") == 0,
+    // The UCRT accepts DST names and applies US rules, but not POSIX rule suffixes.
+    require(_putenv_s("TZ", "EST5EDT") == 0,
             "test time zone can be set");
     _tzset();
 #else
