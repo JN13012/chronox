@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <ctime>
+#include <optional>
 #include <stdexcept>
 
 namespace chronox {
@@ -24,6 +25,33 @@ std::tm localTime(std::time_t timestamp) {
 }
 
 std::time_t localTimestamp(std::tm value) {
+#if defined(_WIN32)
+    std::optional<std::time_t> matchingTimestamp;
+    for (int isdst = 0; isdst <= 1; ++isdst) {
+        std::tm candidate = value;
+        candidate.tm_isdst = isdst;
+        const std::time_t timestamp = std::mktime(&candidate);
+        if (timestamp == static_cast<std::time_t>(-1)) {
+            continue;
+        }
+
+        const std::tm normalized = localTime(timestamp);
+        if (normalized.tm_year == value.tm_year &&
+            normalized.tm_mon == value.tm_mon &&
+            normalized.tm_mday == value.tm_mday &&
+            normalized.tm_hour == value.tm_hour &&
+            normalized.tm_min == value.tm_min &&
+            normalized.tm_sec == value.tm_sec &&
+            normalized.tm_isdst == isdst &&
+            (!matchingTimestamp.has_value() || timestamp < *matchingTimestamp)) {
+            matchingTimestamp = timestamp;
+        }
+    }
+    if (matchingTimestamp.has_value()) {
+        return *matchingTimestamp;
+    }
+#endif
+
     value.tm_isdst = -1;
     const std::time_t result = std::mktime(&value);
     if (result == static_cast<std::time_t>(-1)) {
