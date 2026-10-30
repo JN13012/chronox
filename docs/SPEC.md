@@ -2,39 +2,57 @@
 
 ## Périmètre
 
-Chronox V0 est un programme console natif Windows 10/11, écrit en C++20. Il
-mesure la durée pendant laquelle **la session Windows courante est déverrouillée
-et l’ordinateur éveillé simultanément**.
+Chronox est un programme console natif Windows 10/11, écrit en C++20. Il mesure
+la durée pendant laquelle **la session Windows courante est déverrouillée et
+l’ordinateur éveillé simultanément**.
 
 Inclus :
 
 - état initial de verrouillage interrogé au lancement ;
 - notifications Windows de verrouillage/déverrouillage et de veille/réveil ;
-- temps cumulé affiché avec les transitions d’état ;
-- noyau de transition indépendant de Win32 et tests automatisés.
+- temps cumulé affiché avec les transitions d’état et par jour, semaine, mois
+  et année ;
+- historique local persistant SQLite ;
+- noyau de transition et calculs calendaires indépendants de Win32, avec tests
+  automatisés.
 
-Exclus : interface graphique, service Windows, réseau, base de données,
-persistance, historique et mesure antérieure au démarrage du programme.
+Exclus : interface graphique, service Windows, serveur, service cloud et
+mesure antérieure au démarrage du programme.
 
 ## Règles de comptabilisation
 
 - Le compteur tourne uniquement lorsque `déverrouillée && éveillée`.
 - Il s’arrête sur verrouillage ou entrée en veille et reprend uniquement lorsque
   les deux conditions sont de nouveau réunies.
-- Les durées sont mesurées avec une horloge monotone. Le temps de veille,
-  verrouillé et hors exécution n’est pas compté.
+- Les transitions et points de sauvegarde sont horodatés à partir d’une horloge
+  monotone ancrée à l’heure UTC au lancement. Les ajustements de l’horloge
+  système pendant l’exécution ne produisent pas de durées négatives.
+- Le temps de veille, verrouillé et hors exécution n’est jamais compté.
 - Au lancement, WTS (`WTSSessionInfoEx`) fournit l’état de verrouillage de la
   session courante. Le processus démarre éveillé puisqu’il est en cours
   d’exécution. Une erreur de lecture WTS est signalée et empêche un démarrage
   avec un état supposé.
-- Le cumul est en mémoire : un arrêt ou redémarrage termine la mesure. Au
-  prochain lancement, un nouveau cumul commence ; le temps écoulé programme
-  fermé n’est jamais reconstitué.
+- Les intervalles fermés sont enregistrés dans
+  `%LOCALAPPDATA%\Chronox\chronox.db`, en UTC, dans des transactions SQLite.
+  Une contrainte d’unicité n’autorise qu’un seul intervalle ouvert.
+- Le schéma SQLite utilise `PRAGMA user_version` et des migrations
+  transactionnelles. Une version de Chronox ne modifie pas une base dont le
+  schéma est plus récent.
+- L’intervalle actif est sauvegardé au démarrage, à chaque transition et au
+  moins chaque minute en fonctionnement normal. Après un arrêt inattendu, il
+  est fermé au dernier point de sauvegarde durable ; le temps depuis ce point
+  jusqu’au prochain lancement n’est pas compté. La dernière période peut être
+  sous-estimée du temps écoulé depuis ce point de sauvegarde.
+- Un mutex Windows interdit deux instances simultanées dans la même session,
+  afin qu’un démarrage ne récupère pas l’intervalle actif d’une autre instance.
+- Les rapports jour, semaine (lundi à dimanche), mois et année calculent
+  l’intersection des intervalles UTC avec les limites calendaires du fuseau
+  local. Les journées de changement d’heure peuvent durer 23 ou 25 heures.
 - Les événements redondants ne changent pas l’état ni le cumul. Les événements
   de verrouillage/déverrouillage reçus pendant la veille mettent à jour l’état
   de session sans faire tourner le compteur.
-- Le cumul courant est affiché au démarrage, à chaque transition, puis chaque
-  minute pendant l’exécution.
+- Le cumul de l’intervalle courant et les quatre rapports sont affichés au
+  démarrage, à chaque transition, puis chaque minute pendant l’exécution.
 
 ## Cas limites
 
@@ -45,13 +63,25 @@ persistance, historique et mesure antérieure au démarrage du programme.
 | Ordre initial « veille/réveil » absent | Le processus démarre éveillé ; il ne compte qu’à partir de son lancement. |
 | Notifications identiques répétées | Aucun double départ ni ajout de durée. |
 | Verrouillage pendant la veille | L’état reste inactif ; le réveil ne reprend pas le compteur. |
-| Arrêt/redémarrage | Le dernier cumul en mémoire est affiché à la fin normale ; aucun temps hors processus n’est compté. |
+| Arrêt normal | L’intervalle est fermé et sauvegardé avant l’affichage du cumul final. |
+| Arrêt inattendu | La récupération conserve au plus le temps jusqu’au dernier point de sauvegarde ; le temps hors processus n’est pas compté. |
+| Redémarrage de Chronox | Les anciens intervalles restent disponibles et une nouvelle période débute à l’état Windows initial. |
+| Changement d’heure | Les intervalles restent en UTC ; les rapports suivent les limites calendaires locales, y compris les journées de 23 ou 25 heures. |
 | État de session inaccessible | Erreur explicite et arrêt, sans état initial de repli. |
+
+## Base de données et tests
+
+CMake télécharge l’amalgame SQLite 3.54.1 depuis la source officielle avec une
+empreinte SHA-256 épinglée. Aucun serveur ni bibliothèque SQLite installée sur
+la machine n’est requis. Les tests automatisés couvrent la durabilité après
+réouverture, les transitions idempotentes, la récupération après interruption,
+les sessions traversant minuit, les quatre rapports calendaires et le passage
+à l’heure d’été et à l’heure d’hiver.
 
 ## Vérifications manuelles sous Windows
 
 Ces scénarios doivent être exécutés sur une session Windows interactive. La CI
-Windows vérifie la compilation et les tests du noyau ; elle ne simule pas les
+Windows vérifie la compilation et les tests automatisés ; elle ne simule pas les
 événements matériels/réels de veille et de réveil. Ces tests manuels ne sont pas
 validés par une exécution Linux :
 
@@ -65,7 +95,14 @@ validés par une exécution Linux :
    réveiller le PC. Confirmer que le temps de veille est exclu.
 5. Verrouiller avant la veille, réveiller puis déverrouiller. Confirmer que le
    compteur reste arrêté jusqu’au déverrouillage.
-6. Vérifier que les transitions et le cumul périodique/final s’affichent une
-   seule fois, puis envoyer Ctrl+C. Confirmer une sortie propre et le cumul final.
-7. Tester également une fermeture de session et un arrêt/redémarrage : l’arrêt
-   normal doit afficher le cumul final et un nouveau lancement repartir à zéro.
+6. Vérifier que les transitions et les quatre rapports s’affichent, puis envoyer
+   Ctrl+C. Confirmer une sortie propre, le cumul final et la présence de la base
+   dans `%LOCALAPPDATA%\Chronox\chronox.db`.
+7. Relancer Chronox et vérifier que les rapports conservent les périodes déjà
+   enregistrées.
+8. Tester une fermeture de session et un arrêt/redémarrage. Le démarrage suivant
+   doit conserver l’historique sans ajouter le temps pendant lequel le
+   programme était arrêté.
+
+Ces scénarios de verrouillage, veille et arrêt sur un vrai PC Windows ne sont
+pas validés par les seuls tests automatisés ou la CI.
