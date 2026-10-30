@@ -153,7 +153,9 @@ LRESULT WindowsSessionMonitor::handleMessage(UINT message, WPARAM wParam, LPARAM
     case WM_POWERBROADCAST:
         if (wParam == PBT_APMSUSPEND) {
             onEvent_(SessionEvent::Suspended);
-        } else if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND) {
+        } else if (wParam == PBT_APMRESUMECRITICAL ||
+                   wParam == PBT_APMRESUMEAUTOMATIC ||
+                   wParam == PBT_APMRESUMESUSPEND) {
             onEvent_(SessionEvent::Resumed);
         }
         return TRUE;
@@ -173,6 +175,11 @@ LRESULT WindowsSessionMonitor::handleMessage(UINT message, WPARAM wParam, LPARAM
         DestroyWindow(window_);
         return 0;
     case WM_DESTROY:
+        if (registeredForSessionNotifications_) {
+            WTSUnRegisterSessionNotification(window_);
+            registeredForSessionNotifications_ = false;
+        }
+        KillTimer(window_, TimerId);
         PostQuitMessage(0);
         return 0;
     default:

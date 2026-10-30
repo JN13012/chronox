@@ -50,19 +50,22 @@ persistance, historique et mesure antérieure au démarrage du programme.
 
 ## Vérifications manuelles sous Windows
 
-Ces scénarios doivent être exécutés sur une session Windows interactive ; ils ne
-sont pas validés par les tests portables :
+Ces scénarios doivent être exécutés sur une session Windows interactive. La CI
+Windows vérifie la compilation et les tests du noyau ; elle ne simule pas les
+événements matériels/réels de veille et de réveil. Ces tests manuels ne sont pas
+validés par une exécution Linux :
 
-1. Lancer Chronox avec la session déverrouillée et vérifier que le cumul évolue
-   immédiatement.
-2. Verrouiller avec `Win+L`, attendre quelques secondes, puis déverrouiller :
-   confirmer l’arrêt puis la reprise et vérifier que l’attente verrouillée est
-   exclue.
-3. Mettre Windows en veille, attendre, puis réveiller : confirmer que l’intervalle
-   de veille est exclu.
-4. Verrouiller avant la veille, réveiller puis déverrouiller : confirmer que le
+1. Lancer Chronox depuis une session déjà déverrouillée. Confirmer que le cumul
+   évolue dès le lancement, sans attendre une notification de déverrouillage.
+2. Depuis une session déjà verrouillée, démarrer Chronox si l’environnement le
+   permet ; confirmer un cumul nul jusqu’au prochain déverrouillage.
+3. Verrouiller avec `Win+L`, attendre au moins quelques secondes, puis
+   déverrouiller. Confirmer l’arrêt, la reprise et l’exclusion du temps verrouillé.
+4. Depuis une session déverrouillée, mettre Windows en veille, attendre, puis
+   réveiller le PC. Confirmer que le temps de veille est exclu.
+5. Verrouiller avant la veille, réveiller puis déverrouiller. Confirmer que le
    compteur reste arrêté jusqu’au déverrouillage.
-5. Laisser tourner le programme pendant un arrêt/redémarrage ; confirmer la
-   sortie sur arrêt normal et qu’un nouveau lancement repart avec un cumul neuf.
-6. Vérifier les messages de transition et le cumul dans la console, notamment
-   que les notifications dupliquées ne produisent pas de temps supplémentaire.
+6. Vérifier que les transitions et le cumul périodique/final s’affichent une
+   seule fois, puis envoyer Ctrl+C. Confirmer une sortie propre et le cumul final.
+7. Tester également une fermeture de session et un arrêt/redémarrage : l’arrêt
+   normal doit afficher le cumul final et un nouveau lancement repartir à zéro.

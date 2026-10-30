@@ -23,9 +23,9 @@ BOOL WINAPI consoleControlHandler(DWORD controlType) {
         controlType == CTRL_CLOSE_EVENT || controlType == CTRL_SHUTDOWN_EVENT) {
         const DWORD threadId = mainThreadId.load();
         if (threadId != 0) {
-            PostThreadMessageW(threadId, WM_QUIT, 0, 0);
+            return PostThreadMessageW(threadId, WM_QUIT, 0, 0) ? TRUE : FALSE;
         }
-        return TRUE;
+        return FALSE;
     }
     return FALSE;
 }
