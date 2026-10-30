@@ -266,14 +266,16 @@ std::chrono::microseconds SessionDatabase::duration(CalendarPeriod period,
     const TimeRange range = calendarPeriodContaining(now, period);
     Statement query(
         impl_->database,
-        "SELECT COALESCE(SUM("
-        "min(CASE WHEN ended_at_us IS NULL THEN max(checkpoint_at_us, ?1) "
-        "ELSE ended_at_us END, ?3) - max(started_at_us, ?2)), 0) "
-        "FROM session_intervals "
-        "WHERE started_at_us < ?3 "
-        "AND (ended_at_us > ?2 OR ended_at_us IS NULL) "
-        "AND CASE WHEN ended_at_us IS NULL THEN max(checkpoint_at_us, ?1) "
-        "ELSE ended_at_us END > ?2");
+        "SELECT "
+        "(SELECT COALESCE(SUM(min(ended_at_us, ?3) - max(started_at_us, ?2)), 0) "
+        " FROM session_intervals "
+        " WHERE ended_at_us IS NOT NULL AND ended_at_us > ?2 AND started_at_us < ?3) "
+        "+ "
+        "(SELECT COALESCE(SUM("
+        " min(max(checkpoint_at_us, ?1), ?3) - max(started_at_us, ?2)), 0) "
+        " FROM session_intervals "
+        " WHERE ended_at_us IS NULL AND started_at_us < ?3 "
+        " AND max(checkpoint_at_us, ?1) > ?2)");
     query.bind(now, 1);
     query.bind(range.start, 2);
     query.bind(range.end, 3);

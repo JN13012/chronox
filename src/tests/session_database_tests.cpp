@@ -152,6 +152,55 @@ void sessionsCrossingMidnightBelongToBothCalendarDays() {
     }
 }
 
+void recentStatisticsIgnoreLargeHistoricalIntervals() {
+    TemporaryDatabase file;
+    const auto today =
+        chronox::calendarPeriodContaining(toMicroseconds(std::time(nullptr)),
+                                          CalendarPeriod::Day);
+    SessionDatabase database(file.path());
+
+    sqlite3* rawDatabase = nullptr;
+#if defined(_WIN32)
+    int result = sqlite3_open16(file.path().c_str(), &rawDatabase);
+#else
+    int result = sqlite3_open_v2(file.path().c_str(), &rawDatabase,
+                                 SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nullptr);
+#endif
+    require(result == SQLITE_OK, "historical test database opens");
+    result = sqlite3_exec(rawDatabase, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+    require(result == SQLITE_OK, "historical test transaction begins");
+    sqlite3_stmt* insert = nullptr;
+    result = sqlite3_prepare_v2(
+        rawDatabase,
+        "WITH RECURSIVE sequence(value) AS ("
+        "VALUES(0) UNION ALL SELECT value + 1 FROM sequence WHERE value < 99999"
+        ") "
+        "INSERT INTO session_intervals(started_at_us, checkpoint_at_us, ended_at_us) "
+        "SELECT ?1 + value * ?2 + ?3, ?1 + value * ?2 + ?4, "
+        "?1 + value * ?2 + ?4 FROM sequence",
+        -1, &insert, nullptr);
+    require(result == SQLITE_OK, "historical intervals can be inserted");
+    const auto intervalStep = toTimestampTicks(1h);
+    const auto intervalDuration = toTimestampTicks(5min);
+    const auto firstStart = today.start - 100'000 * intervalStep;
+    require(sqlite3_bind_int64(insert, 1, firstStart) == SQLITE_OK &&
+                sqlite3_bind_int64(insert, 2, intervalStep) == SQLITE_OK &&
+                sqlite3_bind_int64(insert, 3, 0) == SQLITE_OK &&
+                sqlite3_bind_int64(insert, 4, intervalDuration) == SQLITE_OK,
+            "historical interval parameters bind");
+    require(sqlite3_step(insert) == SQLITE_DONE, "historical intervals are inserted");
+    sqlite3_finalize(insert);
+    result = sqlite3_exec(rawDatabase, "COMMIT", nullptr, nullptr, nullptr);
+    require(result == SQLITE_OK, "historical test transaction commits");
+    require(sqlite3_close(rawDatabase) == SQLITE_OK, "historical test database closes");
+
+    const auto start = today.start + toTimestampTicks(60s);
+    database.setCounting(true, start);
+    database.checkpoint(start + toTimestampTicks(45s));
+    require(database.duration(CalendarPeriod::Day, start + toTimestampTicks(45s)) == 45s,
+            "daily reports include the active interval and exclude 100,000 older ones");
+}
+
 void newerDatabaseSchemasAreNotOverwritten() {
     TemporaryDatabase file;
     sqlite3* database = nullptr;
@@ -265,6 +314,7 @@ int main() {
     transitionsAreDurableAndIdempotent();
     interruptedIntervalsStopAtTheirLastCheckpoint();
     sessionsCrossingMidnightBelongToBothCalendarDays();
+    recentStatisticsIgnoreLargeHistoricalIntervals();
     newerDatabaseSchemasAreNotOverwritten();
     allCalendarPeriodsAggregateTheirFullRange();
     daylightSavingUsesLocalCalendarBoundaries();
