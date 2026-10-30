@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <ctime>
-#include <optional>
 #include <stdexcept>
 
 namespace chronox {
@@ -25,33 +24,6 @@ std::tm localTime(std::time_t timestamp) {
 }
 
 std::time_t localTimestamp(std::tm value) {
-#if defined(_WIN32)
-    std::optional<std::time_t> matchingTimestamp;
-    for (int isdst = 0; isdst <= 1; ++isdst) {
-        std::tm candidate = value;
-        candidate.tm_isdst = isdst;
-        const std::time_t timestamp = std::mktime(&candidate);
-        if (timestamp == static_cast<std::time_t>(-1)) {
-            continue;
-        }
-
-        const std::tm normalized = localTime(timestamp);
-        if (normalized.tm_year == value.tm_year &&
-            normalized.tm_mon == value.tm_mon &&
-            normalized.tm_mday == value.tm_mday &&
-            normalized.tm_hour == value.tm_hour &&
-            normalized.tm_min == value.tm_min &&
-            normalized.tm_sec == value.tm_sec &&
-            normalized.tm_isdst == isdst &&
-            (!matchingTimestamp.has_value() || timestamp < *matchingTimestamp)) {
-            matchingTimestamp = timestamp;
-        }
-    }
-    if (matchingTimestamp.has_value()) {
-        return *matchingTimestamp;
-    }
-#endif
-
     value.tm_isdst = -1;
     const std::time_t result = std::mktime(&value);
     if (result == static_cast<std::time_t>(-1)) {
@@ -69,10 +41,21 @@ Timestamp toMicroseconds(std::time_t timestamp) {
 } // namespace
 
 TimeRange calendarPeriodContaining(Timestamp timestamp, CalendarPeriod period) {
+    return calendarPeriodContaining(timestamp, period,
+                                    CalendarTimeConverter{localTime, localTimestamp});
+}
+
+TimeRange calendarPeriodContaining(Timestamp timestamp,
+                                   CalendarPeriod period,
+                                   const CalendarTimeConverter& converter) {
+    if (converter.toLocal == nullptr || converter.toTimestamp == nullptr) {
+        throw std::invalid_argument("Calendar time converter is incomplete");
+    }
+
     const auto seconds = std::chrono::floor<std::chrono::seconds>(
         std::chrono::microseconds(timestamp));
     const auto time = static_cast<std::time_t>(seconds.count());
-    std::tm start = localTime(time);
+    std::tm start = converter.toLocal(time);
     start.tm_hour = 0;
     start.tm_min = 0;
     start.tm_sec = 0;
@@ -96,7 +79,7 @@ TimeRange calendarPeriodContaining(Timestamp timestamp, CalendarPeriod period) {
         break;
     }
 
-    const Timestamp end = toMicroseconds(localTimestamp(start));
+    const Timestamp end = toMicroseconds(converter.toTimestamp(start));
     start.tm_isdst = -1;
     switch (period) {
     case CalendarPeriod::Day:
@@ -115,9 +98,11 @@ TimeRange calendarPeriodContaining(Timestamp timestamp, CalendarPeriod period) {
         start.tm_mday = 1;
         break;
     }
-    const Timestamp begin = toMicroseconds(localTimestamp(start));
+    const Timestamp begin = toMicroseconds(converter.toTimestamp(start));
     if (end <= begin || end - begin > MicrosecondsPerSecond * 366LL * 24LL * 60LL * 60LL) {
-        throw std::runtime_error("Invalid local calendar period");
+        throw std::runtime_error("Invalid local calendar period: start=" +
+                                 std::to_string(begin) + " end=" +
+                                 std::to_string(end));
     }
     return {begin, end};
 }

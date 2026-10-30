@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <ctime>
 
 namespace chronox {
 
@@ -18,6 +19,14 @@ struct TimeRange {
     Timestamp end;
 };
 
+struct CalendarTimeConverter {
+    std::tm (*toLocal)(std::time_t);
+    std::time_t (*toTimestamp)(std::tm);
+};
+
 TimeRange calendarPeriodContaining(Timestamp timestamp, CalendarPeriod period);
+TimeRange calendarPeriodContaining(Timestamp timestamp,
+                                   CalendarPeriod period,
+                                   const CalendarTimeConverter& converter);
 
 } // namespace chronox

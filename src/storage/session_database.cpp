@@ -264,6 +264,19 @@ Timestamp SessionDatabase::latestRecordedTimestamp() const {
 std::chrono::microseconds SessionDatabase::duration(CalendarPeriod period,
                                                      Timestamp now) const {
     const TimeRange range = calendarPeriodContaining(now, period);
+    return duration(range, now);
+}
+
+std::chrono::microseconds SessionDatabase::duration(
+    CalendarPeriod period,
+    Timestamp now,
+    const CalendarTimeConverter& converter) const {
+    const TimeRange range = calendarPeriodContaining(now, period, converter);
+    return duration(range, now);
+}
+
+std::chrono::microseconds SessionDatabase::duration(TimeRange range,
+                                                     Timestamp now) const {
     Statement query(
         impl_->database,
         "SELECT "

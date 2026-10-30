@@ -77,9 +77,9 @@ la machine n’est requis. Les tests automatisés couvrent la durabilité après
 réouverture, les transitions idempotentes, la récupération après interruption,
 les sessions traversant minuit, les quatre rapports calendaires et le passage
 à l’heure d’été et à l’heure d’hiver.
-Sous Windows, le test DST utilise la syntaxe documentée par le CRT
-(`EST5EDT`), qui applique les règles américaines par défaut ; les autres
-plateformes utilisent les règles POSIX explicites.
+Sous Windows, le test DST utilise un convertisseur de fuseau déterministe
+pour ne pas dépendre de la conversion d’offset de `_tzset` dans le CRT du
+runner ; les autres plateformes exercent les règles POSIX du runtime.
 
 ## Vérifications manuelles sous Windows
 

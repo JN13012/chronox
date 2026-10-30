@@ -22,8 +22,13 @@ public:
     void checkpoint(Timestamp timestamp);
     Timestamp latestRecordedTimestamp() const;
     std::chrono::microseconds duration(CalendarPeriod period, Timestamp now) const;
+    std::chrono::microseconds duration(CalendarPeriod period,
+                                       Timestamp now,
+                                       const CalendarTimeConverter& converter) const;
 
 private:
+    std::chrono::microseconds duration(TimeRange range, Timestamp now) const;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

@@ -75,21 +75,42 @@ Timestamp toMicroseconds(std::time_t timestamp) {
         .count();
 }
 
-std::string describeTimestamp(Timestamp timestamp) {
+std::tm utcTime(std::time_t timestamp) {
+    std::tm result{};
+#if defined(_WIN32)
+    if (gmtime_s(&result, &timestamp) != 0) {
+        throw std::runtime_error("Could not convert UTC diagnostic timestamp");
+    }
+#else
+    if (gmtime_r(&timestamp, &result) == nullptr) {
+        throw std::runtime_error("Could not convert UTC diagnostic timestamp");
+    }
+#endif
+    return result;
+}
+
+std::string describeTimestamp(
+    Timestamp timestamp,
+    const chronox::CalendarTimeConverter* converter = nullptr) {
     const auto seconds = std::chrono::floor<std::chrono::seconds>(
         std::chrono::microseconds(timestamp));
     const auto time = static_cast<std::time_t>(seconds.count());
     std::tm local{};
     std::tm utc{};
 #if defined(_WIN32)
-    if (localtime_s(&local, &time) != 0 || gmtime_s(&utc, &time) != 0) {
+    if (converter != nullptr) {
+        local = converter->toLocal(time);
+    } else if (localtime_s(&local, &time) != 0) {
         throw std::runtime_error("Could not format DST diagnostic timestamp");
     }
 #else
-    if (localtime_r(&time, &local) == nullptr || gmtime_r(&time, &utc) == nullptr) {
+    if (converter != nullptr) {
+        local = converter->toLocal(time);
+    } else if (localtime_r(&time, &local) == nullptr) {
         throw std::runtime_error("Could not format DST diagnostic timestamp");
     }
 #endif
+    utc = utcTime(time);
 
     std::ostringstream description;
     description << "epoch_us=" << timestamp << " UTC="
@@ -99,23 +120,47 @@ std::string describeTimestamp(Timestamp timestamp) {
     return description.str();
 }
 
-#if defined(_WIN32)
-std::string describeMktimeCandidate(int year, int month, int day, int isdst) {
-    std::tm candidate{};
-    candidate.tm_year = year - 1900;
-    candidate.tm_mon = month - 1;
-    candidate.tm_mday = day;
-    candidate.tm_isdst = isdst;
-    const std::time_t timestamp = std::mktime(&candidate);
-    if (timestamp == static_cast<std::time_t>(-1)) {
-        return "mktime candidate isdst=" + std::to_string(isdst) + " failed";
-    }
-
-    return "mktime candidate isdst=" + std::to_string(isdst) +
-           " normalized_isdst=" + std::to_string(candidate.tm_isdst) + " " +
-           describeTimestamp(toMicroseconds(timestamp));
+std::time_t utcTimestamp(int year, unsigned month, unsigned day, int hour) {
+    const auto date = std::chrono::sys_days{
+        std::chrono::year{year} / std::chrono::month{month} /
+        std::chrono::day{day}};
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               date.time_since_epoch() + std::chrono::hours{hour})
+        .count();
 }
-#endif
+
+bool easternDaylightAtUtc(std::time_t timestamp) {
+    return timestamp >= utcTimestamp(2024, 3, 10, 7) &&
+           timestamp < utcTimestamp(2024, 11, 3, 6);
+}
+
+std::tm easternLocalTime(std::time_t timestamp) {
+    const bool daylight = easternDaylightAtUtc(timestamp);
+    const std::time_t localSeconds =
+        timestamp - std::chrono::hours{daylight ? 4 : 5}.count() * 60 * 60;
+    std::tm local = utcTime(localSeconds);
+    local.tm_isdst = daylight ? 1 : 0;
+    return local;
+}
+
+std::time_t easternTimestamp(std::tm local) {
+    const auto month = std::chrono::year{local.tm_year + 1900} /
+                       std::chrono::January + std::chrono::months{local.tm_mon};
+    const auto day = std::chrono::sys_days{month / std::chrono::day{1}} +
+                     std::chrono::days{local.tm_mday - 1};
+    const std::time_t localAsUtc =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            day.time_since_epoch() + std::chrono::hours{local.tm_hour} +
+            std::chrono::minutes{local.tm_min} +
+            std::chrono::seconds{local.tm_sec})
+            .count();
+    const std::time_t daylightStart = utcTimestamp(2024, 3, 10, 3);
+    const std::time_t daylightEnd = utcTimestamp(2024, 11, 3, 1);
+    const bool daylight =
+        localAsUtc >= daylightStart && localAsUtc < daylightEnd;
+    return localAsUtc +
+           std::chrono::hours{daylight ? 4 : 5}.count() * 60 * 60;
+}
 
 template <typename Rep, typename Period>
 Timestamp toTimestampTicks(std::chrono::duration<Rep, Period> duration) {
@@ -303,46 +348,115 @@ void allCalendarPeriodsAggregateTheirFullRange() {
     }
 }
 
+void deterministicEasternConverterPreservesDstPeriods() {
+    const chronox::CalendarTimeConverter converter{
+        easternLocalTime, easternTimestamp};
+    for (const auto& test : {
+             std::pair{std::array{2024, 3, 10}, 23h},
+             std::pair{std::array{2024, 11, 3}, 25h},
+         }) {
+        std::tm localNoon{};
+        localNoon.tm_year = test.first[0] - 1900;
+        localNoon.tm_mon = test.first[1] - 1;
+        localNoon.tm_mday = test.first[2];
+        localNoon.tm_hour = 12;
+        const Timestamp midday = toMicroseconds(easternTimestamp(localNoon));
+        const auto day = chronox::calendarPeriodContaining(
+            midday, CalendarPeriod::Day, converter);
+        const auto week = chronox::calendarPeriodContaining(
+            midday, CalendarPeriod::Week, converter);
+        const auto expectedWeek = test.second + 6 * 24h;
+        require(std::chrono::microseconds(day.end - day.start) == test.second,
+                "deterministic DST day has its 23-hour or 25-hour boundary");
+        require(std::chrono::microseconds(week.end - week.start) == expectedWeek,
+                "deterministic DST week has its 167-hour or 169-hour boundary");
+
+        TemporaryDatabase dailyFile;
+        SessionDatabase dailyDatabase(dailyFile.path());
+        dailyDatabase.setCounting(true, day.start);
+        dailyDatabase.setCounting(false, day.end);
+        require(dailyDatabase.duration(CalendarPeriod::Day, midday, converter) ==
+                    test.second,
+                "deterministic DST day report includes its full local day");
+
+        TemporaryDatabase weeklyFile;
+        SessionDatabase weeklyDatabase(weeklyFile.path());
+        weeklyDatabase.setCounting(true, week.start);
+        weeklyDatabase.setCounting(false, week.end);
+        require(weeklyDatabase.duration(CalendarPeriod::Week, midday, converter) ==
+                    expectedWeek,
+                "deterministic DST week report includes its full local week");
+    }
+}
+
 void daylightSavingUsesLocalCalendarBoundaries() {
 #if defined(_WIN32)
-    // The UCRT accepts DST names and applies US rules, but not POSIX rule suffixes.
-    require(_putenv_s("TZ", "EST5EDT") == 0,
-            "test time zone can be set");
-    _tzset();
+    const chronox::CalendarTimeConverter deterministicEastern{
+        easternLocalTime, easternTimestamp};
+    const auto* converter = &deterministicEastern;
 #else
     require(setenv("TZ", "EST5EDT,M3.2.0/2,M11.1.0/2", 1) == 0,
             "test time zone can be set");
     tzset();
+    const chronox::CalendarTimeConverter* converter = nullptr;
 #endif
+
+    const auto calendarRange = [converter](Timestamp timestamp, CalendarPeriod period) {
+        if (converter != nullptr) {
+            return chronox::calendarPeriodContaining(timestamp, period, *converter);
+        }
+        return chronox::calendarPeriodContaining(timestamp, period);
+    };
+    const auto periodDuration = [converter](const SessionDatabase& database,
+                                            CalendarPeriod period,
+                                            Timestamp timestamp) {
+        if (converter != nullptr) {
+            return database.duration(period, timestamp, *converter);
+        }
+        return database.duration(period, timestamp);
+    };
 
     for (const auto& test : {
              std::pair{std::array{2024, 3, 10}, 23h},
              std::pair{std::array{2024, 11, 3}, 25h},
          }) {
         TemporaryDatabase file;
+#if defined(_WIN32)
+        std::tm localNoon{};
+        localNoon.tm_year = test.first[0] - 1900;
+        localNoon.tm_mon = test.first[1] - 1;
+        localNoon.tm_mday = test.first[2];
+        localNoon.tm_hour = 12;
+        const Timestamp midday = toMicroseconds(easternTimestamp(localNoon));
+#else
         const Timestamp midday = toMicroseconds(
             localTimestamp(test.first[0], test.first[1], test.first[2], 12));
-        const auto range = chronox::calendarPeriodContaining(midday, CalendarPeriod::Day);
+#endif
+        const auto range = calendarRange(midday, CalendarPeriod::Day);
         const auto dayDuration = std::chrono::microseconds(range.end - range.start);
-        const auto week = chronox::calendarPeriodContaining(midday, CalendarPeriod::Week);
+        const auto week = calendarRange(midday, CalendarPeriod::Week);
         const auto weekDuration = std::chrono::microseconds(week.end - week.start);
         SessionDatabase database(file.path());
         database.setCounting(true, range.start);
         database.setCounting(false, range.end);
-        const auto dayReport = database.duration(CalendarPeriod::Day, midday);
+        const auto dayReport = periodDuration(database, CalendarPeriod::Day, midday);
         TemporaryDatabase weeklyFile;
         SessionDatabase weeklyDatabase(weeklyFile.path());
         weeklyDatabase.setCounting(true, week.start);
         weeklyDatabase.setCounting(false, week.end);
-        const auto weekReport = weeklyDatabase.duration(CalendarPeriod::Week, midday);
+        const auto weekReport = periodDuration(weeklyDatabase, CalendarPeriod::Week, midday);
         const auto expectedWeek = test.second + 6 * 24h;
 
         if (dayDuration != test.second || weekDuration != expectedWeek ||
             dayReport != test.second || weekReport != expectedWeek) {
+#if defined(_WIN32)
+            std::cerr << "DST diagnostics: timezone_source=deterministic-US-Eastern-2024";
+#else
             const char* configuredTimezone = std::getenv("TZ");
             std::cerr << "DST diagnostics: TZ="
-                      << (configuredTimezone == nullptr ? "<unset>" : configuredTimezone)
-                      << " requested_local_date=" << test.first[0] << '-'
+                      << (configuredTimezone == nullptr ? "<unset>" : configuredTimezone);
+#endif
+            std::cerr << " requested_local_date=" << test.first[0] << '-'
                       << std::setfill('0') << std::setw(2) << test.first[1] << '-'
                       << std::setw(2) << test.first[2] << std::setfill(' ')
                       << " expected_day_seconds="
@@ -358,20 +472,11 @@ void daylightSavingUsesLocalCalendarBoundaries() {
                       << " week_report_seconds="
                       << std::chrono::duration_cast<std::chrono::seconds>(weekReport).count()
                       << '\n'
-                      << "  midday: " << describeTimestamp(midday) << '\n'
-                      << "  day start: " << describeTimestamp(range.start) << '\n'
-                      << "  day end: " << describeTimestamp(range.end) << '\n'
-                      << "  week start: " << describeTimestamp(week.start) << '\n'
-                      << "  week end: " << describeTimestamp(week.end) << '\n';
-#if defined(_WIN32)
-            const int nextDay = test.first[2] + 1;
-            std::cerr << "  next-midnight candidates: "
-                      << describeMktimeCandidate(test.first[0], test.first[1], nextDay, 0)
-                      << '\n'
-                      << "  next-midnight candidates: "
-                      << describeMktimeCandidate(test.first[0], test.first[1], nextDay, 1)
-                      << '\n';
-#endif
+                      << "  midday: " << describeTimestamp(midday, converter) << '\n'
+                      << "  day start: " << describeTimestamp(range.start, converter) << '\n'
+                      << "  day end: " << describeTimestamp(range.end, converter) << '\n'
+                      << "  week start: " << describeTimestamp(week.start, converter) << '\n'
+                      << "  week end: " << describeTimestamp(week.end, converter) << '\n';
         }
 
         require(dayDuration == test.second,
@@ -384,10 +489,7 @@ void daylightSavingUsesLocalCalendarBoundaries() {
                 "DST week report includes exactly the local week's elapsed time");
     }
 
-#if defined(_WIN32)
-    _putenv_s("TZ", "");
-    _tzset();
-#else
+#if !defined(_WIN32)
     unsetenv("TZ");
     tzset();
 #endif
@@ -402,6 +504,7 @@ int main() {
     recentStatisticsIgnoreLargeHistoricalIntervals();
     newerDatabaseSchemasAreNotOverwritten();
     allCalendarPeriodsAggregateTheirFullRange();
+    deterministicEasternConverterPreservesDstPeriods();
     daylightSavingUsesLocalCalendarBoundaries();
     std::cout << "All session database tests passed.\n";
 }
