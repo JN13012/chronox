@@ -99,6 +99,24 @@ std::string describeTimestamp(Timestamp timestamp) {
     return description.str();
 }
 
+#if defined(_WIN32)
+std::string describeMktimeCandidate(int year, int month, int day, int isdst) {
+    std::tm candidate{};
+    candidate.tm_year = year - 1900;
+    candidate.tm_mon = month - 1;
+    candidate.tm_mday = day;
+    candidate.tm_isdst = isdst;
+    const std::time_t timestamp = std::mktime(&candidate);
+    if (timestamp == static_cast<std::time_t>(-1)) {
+        return "mktime candidate isdst=" + std::to_string(isdst) + " failed";
+    }
+
+    return "mktime candidate isdst=" + std::to_string(isdst) +
+           " normalized_isdst=" + std::to_string(candidate.tm_isdst) + " " +
+           describeTimestamp(toMicroseconds(timestamp));
+}
+#endif
+
 template <typename Rep, typename Period>
 Timestamp toTimestampTicks(std::chrono::duration<Rep, Period> duration) {
     return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
@@ -345,6 +363,15 @@ void daylightSavingUsesLocalCalendarBoundaries() {
                       << "  day end: " << describeTimestamp(range.end) << '\n'
                       << "  week start: " << describeTimestamp(week.start) << '\n'
                       << "  week end: " << describeTimestamp(week.end) << '\n';
+#if defined(_WIN32)
+            const int nextDay = test.first[2] + 1;
+            std::cerr << "  next-midnight candidates: "
+                      << describeMktimeCandidate(test.first[0], test.first[1], nextDay, 0)
+                      << '\n'
+                      << "  next-midnight candidates: "
+                      << describeMktimeCandidate(test.first[0], test.first[1], nextDay, 1)
+                      << '\n';
+#endif
         }
 
         require(dayDuration == test.second,
