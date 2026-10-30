@@ -8,8 +8,11 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -70,6 +73,30 @@ Timestamp toMicroseconds(std::time_t timestamp) {
     return std::chrono::duration_cast<std::chrono::microseconds>(
                std::chrono::seconds(timestamp))
         .count();
+}
+
+std::string describeTimestamp(Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto time = static_cast<std::time_t>(seconds.count());
+    std::tm local{};
+    std::tm utc{};
+#if defined(_WIN32)
+    if (localtime_s(&local, &time) != 0 || gmtime_s(&utc, &time) != 0) {
+        throw std::runtime_error("Could not format DST diagnostic timestamp");
+    }
+#else
+    if (localtime_r(&time, &local) == nullptr || gmtime_r(&time, &utc) == nullptr) {
+        throw std::runtime_error("Could not format DST diagnostic timestamp");
+    }
+#endif
+
+    std::ostringstream description;
+    description << "epoch_us=" << timestamp << " UTC="
+                << std::put_time(&utc, "%Y-%m-%d %H:%M:%S") << " local="
+                << std::put_time(&local, "%Y-%m-%d %H:%M:%S")
+                << " local_tm_isdst=" << local.tm_isdst;
+    return description.str();
 }
 
 template <typename Rep, typename Period>
@@ -278,25 +305,55 @@ void daylightSavingUsesLocalCalendarBoundaries() {
         const Timestamp midday = toMicroseconds(
             localTimestamp(test.first[0], test.first[1], test.first[2], 12));
         const auto range = chronox::calendarPeriodContaining(midday, CalendarPeriod::Day);
-        require(std::chrono::microseconds(range.end - range.start) == test.second,
-                "DST day follows its 23-hour or 25-hour local boundary");
+        const auto dayDuration = std::chrono::microseconds(range.end - range.start);
         const auto week = chronox::calendarPeriodContaining(midday, CalendarPeriod::Week);
-        require(std::chrono::microseconds(week.end - week.start) ==
-                    test.second + 6 * 24h,
-                "DST week follows its 167-hour or 169-hour local boundary");
+        const auto weekDuration = std::chrono::microseconds(week.end - week.start);
         SessionDatabase database(file.path());
         database.setCounting(true, range.start);
         database.setCounting(false, range.end);
-        require(database.duration(CalendarPeriod::Day, midday) == test.second,
-                "DST day report includes exactly the local day's elapsed time");
+        const auto dayReport = database.duration(CalendarPeriod::Day, midday);
         TemporaryDatabase weeklyFile;
-        const auto weekRange =
-            chronox::calendarPeriodContaining(midday, CalendarPeriod::Week);
         SessionDatabase weeklyDatabase(weeklyFile.path());
-        weeklyDatabase.setCounting(true, weekRange.start);
-        weeklyDatabase.setCounting(false, weekRange.end);
-        require(weeklyDatabase.duration(CalendarPeriod::Week, midday) ==
-                    test.second + 6 * 24h,
+        weeklyDatabase.setCounting(true, week.start);
+        weeklyDatabase.setCounting(false, week.end);
+        const auto weekReport = weeklyDatabase.duration(CalendarPeriod::Week, midday);
+        const auto expectedWeek = test.second + 6 * 24h;
+
+        if (dayDuration != test.second || weekDuration != expectedWeek ||
+            dayReport != test.second || weekReport != expectedWeek) {
+            const char* configuredTimezone = std::getenv("TZ");
+            std::cerr << "DST diagnostics: TZ="
+                      << (configuredTimezone == nullptr ? "<unset>" : configuredTimezone)
+                      << " requested_local_date=" << test.first[0] << '-'
+                      << std::setfill('0') << std::setw(2) << test.first[1] << '-'
+                      << std::setw(2) << test.first[2] << std::setfill(' ')
+                      << " expected_day_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(test.second).count()
+                      << " actual_day_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(dayDuration).count()
+                      << " expected_week_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(expectedWeek).count()
+                      << " actual_week_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(weekDuration).count()
+                      << " day_report_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(dayReport).count()
+                      << " week_report_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(weekReport).count()
+                      << '\n'
+                      << "  midday: " << describeTimestamp(midday) << '\n'
+                      << "  day start: " << describeTimestamp(range.start) << '\n'
+                      << "  day end: " << describeTimestamp(range.end) << '\n'
+                      << "  week start: " << describeTimestamp(week.start) << '\n'
+                      << "  week end: " << describeTimestamp(week.end) << '\n';
+        }
+
+        require(dayDuration == test.second,
+                "DST day follows its 23-hour or 25-hour local boundary");
+        require(weekDuration == expectedWeek,
+                "DST week follows its 167-hour or 169-hour local boundary");
+        require(dayReport == test.second,
+                "DST day report includes exactly the local day's elapsed time");
+        require(weekReport == expectedWeek,
                 "DST week report includes exactly the local week's elapsed time");
     }
 
