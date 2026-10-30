@@ -1,4 +1,5 @@
 #include "session_tracker.h"
+#include "utc_timestamp_clock.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -79,6 +80,37 @@ void sleepAndWakeWhileLockedDoNotAddTime() {
     require(tracker.elapsed(start + 12s) == 2s, "unlock starts a fresh interval");
 }
 
+void utcTimestampsKeepMicrosecondPrecision() {
+    const auto start = chronox::UtcTimestampClock::TimePoint{};
+    constexpr chronox::Timestamp utcStart = 1'800'000'000'123'456;
+    chronox::UtcTimestampClock clock(start, utcStart);
+    require(clock.at(start + 1500ms) == utcStart + 1'500'000,
+            "steady-clock durations convert to UTC microseconds");
+}
+
+void utcTimestampsRemainMonotonicAcrossClockAdjustments() {
+    const auto start = chronox::UtcTimestampClock::TimePoint{};
+    constexpr chronox::Timestamp utcStart = 1'800'000'000'000'000;
+    chronox::UtcTimestampClock clock(start, utcStart);
+    require(clock.at(start + 5s) == utcStart + 5'000'000,
+            "monotonic elapsed time advances the UTC timestamp");
+    clock.reanchor(start + 10s, utcStart - 100'000'000);
+    require(clock.at(start + 11s) == utcStart + 6'000'000,
+            "a backward wall-clock adjustment cannot move timestamps backward");
+}
+
+void utcTimestampsReanchorAfterResumeAndDatabaseRestart() {
+    const auto start = chronox::UtcTimestampClock::TimePoint{};
+    constexpr chronox::Timestamp utcStart = 1'800'000'000'000'000;
+    chronox::UtcTimestampClock clock(start, utcStart);
+    clock.reanchor(start + 1h, utcStart + 3'600'000'000);
+    require(clock.at(start + 1h + 250ms) == utcStart + 3'600'250'000,
+            "resume reanchors using elapsed UTC microseconds");
+    clock.reanchor(start + 2h, utcStart + 7'200'000'000);
+    require(clock.at(start + 2h + 500ms) == utcStart + 7'200'500'000,
+            "restart reanchors after the last persisted interval");
+}
+
 } // namespace
 
 int main() {
@@ -89,5 +121,8 @@ int main() {
     duplicateEventsAreIdempotent();
     wakingWhileLockedDoesNotResumeCounting();
     sleepAndWakeWhileLockedDoNotAddTime();
+    utcTimestampsKeepMicrosecondPrecision();
+    utcTimestampsRemainMonotonicAcrossClockAdjustments();
+    utcTimestampsReanchorAfterResumeAndDatabaseRestart();
     std::cout << "All session tracker tests passed.\n";
 }

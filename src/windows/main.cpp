@@ -1,6 +1,8 @@
 #include "windows_session_monitor.h"
 #include "../storage/session_database.h"
 
+#include "../core/utc_timestamp_clock.h"
+
 #include <windows.h>
 
 #include <atomic>
@@ -77,60 +79,6 @@ std::filesystem::path databasePath() {
     return directory / L"chronox.db";
 }
 
-chronox::Timestamp utcTimestamp(SessionTracker::TimePoint steadyNow,
-                                SessionTracker::TimePoint steadyAnchor,
-                                std::chrono::system_clock::time_point utcAnchor) {
-    return std::chrono::time_point_cast<std::chrono::microseconds>(
-               utcAnchor + (steadyNow - steadyAnchor))
-        .time_since_epoch()
-        .count();
-}
-
-class UtcClock {
-public:
-    UtcClock()
-        : steadyAnchor_(SessionTracker::Clock::now()),
-          utcAnchor_(std::chrono::system_clock::now()) {}
-
-    chronox::Timestamp at(SessionTracker::TimePoint steadyNow) {
-        const auto timestamp = utcTimestamp(steadyNow, steadyAnchor_, utcAnchor_);
-        if (!lastTimestamp_.has_value() || timestamp > *lastTimestamp_) {
-            lastTimestamp_ = timestamp;
-        }
-        return *lastTimestamp_;
-    }
-
-    void reanchorAfterResume(SessionTracker::TimePoint steadyNow) {
-        auto utcNow = std::chrono::time_point_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now());
-        if (lastTimestamp_.has_value() &&
-            utcNow.time_since_epoch().count() < *lastTimestamp_) {
-            utcNow = std::chrono::system_clock::time_point(
-                std::chrono::microseconds(*lastTimestamp_));
-        }
-        steadyAnchor_ = steadyNow;
-        utcAnchor_ = utcNow;
-        lastTimestamp_ = utcNow.time_since_epoch().count();
-    }
-
-    void alignWithPersistedTime(chronox::Timestamp timestamp) {
-        auto utcNow = std::chrono::time_point_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now());
-        if (utcNow.time_since_epoch().count() < timestamp) {
-            utcNow = std::chrono::system_clock::time_point(
-                std::chrono::microseconds(timestamp));
-        }
-        steadyAnchor_ = SessionTracker::Clock::now();
-        utcAnchor_ = utcNow;
-        lastTimestamp_ = utcNow.time_since_epoch().count();
-    }
-
-private:
-    SessionTracker::TimePoint steadyAnchor_;
-    std::chrono::system_clock::time_point utcAnchor_;
-    std::optional<chronox::Timestamp> lastTimestamp_;
-};
-
 BOOL WINAPI consoleControlHandler(DWORD controlType) {
     if (controlType == CTRL_C_EVENT || controlType == CTRL_BREAK_EVENT ||
         controlType == CTRL_CLOSE_EVENT || controlType == CTRL_SHUTDOWN_EVENT) {
@@ -193,7 +141,7 @@ int main() {
         SingleInstanceGuard instanceGuard;
         std::optional<SessionTracker> tracker;
         std::exception_ptr callbackError;
-        UtcClock utcClock;
+        chronox::UtcTimestampClock utcClock;
         chronox::SessionDatabase database(databasePath());
         utcClock.alignWithPersistedTime(database.latestRecordedTimestamp());
 

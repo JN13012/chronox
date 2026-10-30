@@ -17,10 +17,10 @@ ctest --test-dir build -C Release --output-on-failure
 
 La configuration télécharge l’amalgame SQLite 3.54.1 depuis sqlite.org et
 vérifie son empreinte SHA-256 ; une connexion Internet est nécessaire à la
-première configuration. Le prototype Windows est construit dans
-`build\src\chronox.exe`. Le noyau, le stockage et leurs tests peuvent aussi être
-compilés sur un système non-Windows ; le moniteur Windows ne s’exécute que sous
-Windows.
+première configuration. Le prototype Windows Release est construit dans
+`build\src\Release\chronox.exe` avec le générateur Visual Studio. Le noyau, le
+stockage et leurs tests peuvent aussi être compilés sur un système non-Windows ;
+le moniteur Windows ne s’exécute que sous Windows.
 
 ## Données et rapports
 

@@ -1,6 +1,7 @@
 add_library(chronox_core
    core/calendar_period.cpp
    core/session_tracker.cpp
+   core/utc_timestamp_clock.cpp
 )
 target_include_directories(chronox_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core
