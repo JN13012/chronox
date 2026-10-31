@@ -25,13 +25,11 @@ WindowsSessionMonitor::WindowsSessionMonitor(EventHandler onEvent, StopHandler o
       onTick_(std::move(onTick)) {}
 
 WindowsSessionMonitor::~WindowsSessionMonitor() {
-    if (registeredForSessionNotifications_ && window_ != nullptr) {
-        WTSUnRegisterSessionNotification(window_);
-    }
     if (window_ != nullptr && IsWindow(window_)) {
-        KillTimer(window_, TimerId);
+        releaseWindowResources(window_);
         DestroyWindow(window_);
     }
+    window_ = nullptr;
 }
 
 bool WindowsSessionMonitor::queryInitiallyLocked() {
@@ -74,41 +72,87 @@ bool WindowsSessionMonitor::queryInitiallyLocked() {
 }
 
 void WindowsSessionMonitor::start() {
+    if (window_ != nullptr) {
+        throw windowsError("WindowsSessionMonitor::start", ERROR_ALREADY_INITIALIZED);
+    }
+
+    const HWND window = createWindow();
+    if (window == nullptr) {
+        throw windowsError("CreateWindowExW", GetLastError());
+    }
+
+    if (!WTSRegisterSessionNotification(window, NOTIFY_FOR_THIS_SESSION)) {
+        const DWORD error = GetLastError();
+        destroyWindow();
+        throw windowsError("WTSRegisterSessionNotification", error);
+    }
+    registeredForSessionNotifications_ = true;
+
+    if (SetTimer(window, TimerId, 60'000, nullptr) == 0) {
+        const DWORD error = GetLastError();
+        releaseWindowResources(window_);
+        destroyWindow();
+        throw windowsError("SetTimer", error);
+    }
+    timerSet_ = true;
+
+    MSG message{};
+    PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+}
+
+HWND WindowsSessionMonitor::createWindow() {
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
     windowClass.lpfnWndProc = &WindowsSessionMonitor::windowProcedure;
     windowClass.hInstance = GetModuleHandleW(nullptr);
     windowClass.lpszClassName = WindowClassName;
 
-    if (RegisterClassExW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-        throw windowsError("RegisterClassExW", GetLastError());
-    }
-
-    window_ = CreateWindowExW(0, WindowClassName, L"", 0, 0, 0, 0, 0,
-                              nullptr, nullptr, windowClass.hInstance, this);
-    if (window_ == nullptr) {
-        throw windowsError("CreateWindowExW", GetLastError());
-    }
-
-    if (!WTSRegisterSessionNotification(window_, NOTIFY_FOR_THIS_SESSION)) {
+    if (RegisterClassExW(&windowClass) == 0) {
         const DWORD error = GetLastError();
-        DestroyWindow(window_);
+        if (error != ERROR_CLASS_ALREADY_EXISTS) {
+            throw windowsError("RegisterClassExW", error);
+        }
+    }
+
+    const HWND window =
+        CreateWindowExW(0, WindowClassName, L"", 0, 0, 0, 0, 0, nullptr,
+                        nullptr, windowClass.hInstance, this);
+    if (window != nullptr) {
+        window_ = window;
+    }
+    return window;
+}
+
+void WindowsSessionMonitor::destroyWindow() {
+    const HWND window = window_;
+    if (window == nullptr || !IsWindow(window)) {
         window_ = nullptr;
-        throw windowsError("WTSRegisterSessionNotification", error);
-    }
-    registeredForSessionNotifications_ = true;
-
-    if (SetTimer(window_, TimerId, 60'000, nullptr) == 0) {
-        const DWORD error = GetLastError();
-        WTSUnRegisterSessionNotification(window_);
         registeredForSessionNotifications_ = false;
-        DestroyWindow(window_);
-        window_ = nullptr;
-        throw windowsError("SetTimer", error);
+        timerSet_ = false;
+        return;
     }
 
-    MSG message{};
-    PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    releaseWindowResources(window);
+    if (!DestroyWindow(window)) {
+        throw windowsError("DestroyWindow", GetLastError());
+    }
+}
+
+void WindowsSessionMonitor::releaseWindowResources(HWND window) {
+    if (window == nullptr || !IsWindow(window)) {
+        registeredForSessionNotifications_ = false;
+        timerSet_ = false;
+        return;
+    }
+
+    if (registeredForSessionNotifications_) {
+        WTSUnRegisterSessionNotification(window);
+        registeredForSessionNotifications_ = false;
+    }
+    if (timerSet_) {
+        KillTimer(window, TimerId);
+        timerSet_ = false;
+    }
 }
 
 void WindowsSessionMonitor::run() {
@@ -132,16 +176,25 @@ LRESULT CALLBACK WindowsSessionMonitor::windowProcedure(HWND window, UINT messag
         GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
         const auto* createInfo = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+        if (createInfo == nullptr || createInfo->lpCreateParams == nullptr) {
+            return FALSE;
+        }
         monitor = static_cast<WindowsSessionMonitor*>(createInfo->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(monitor));
+        SetLastError(ERROR_SUCCESS);
+        if (SetWindowLongPtrW(window, GWLP_USERDATA,
+                              reinterpret_cast<LONG_PTR>(monitor)) == 0 &&
+            GetLastError() != ERROR_SUCCESS) {
+            return FALSE;
+        }
     }
     if (monitor != nullptr) {
-        return monitor->handleMessage(message, wParam, lParam);
+        return monitor->handleMessage(window, message, wParam, lParam);
     }
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
-LRESULT WindowsSessionMonitor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
+LRESULT WindowsSessionMonitor::handleMessage(HWND window, UINT message,
+                                             WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_WTSSESSION_CHANGE:
         if (wParam == WTS_SESSION_LOCK) {
@@ -172,18 +225,24 @@ LRESULT WindowsSessionMonitor::handleMessage(UINT message, WPARAM wParam, LPARAM
         return 0;
     case WM_CLOSE:
         onStop_();
-        DestroyWindow(window_);
+        if (window != nullptr && IsWindow(window)) {
+            DestroyWindow(window);
+        }
         return 0;
     case WM_DESTROY:
-        if (registeredForSessionNotifications_) {
-            WTSUnRegisterSessionNotification(window_);
-            registeredForSessionNotifications_ = false;
-        }
-        KillTimer(window_, TimerId);
+        releaseWindowResources(window);
         PostQuitMessage(0);
         return 0;
+    case WM_NCDESTROY: {
+        releaseWindowResources(window);
+        SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+        if (window_ == window) {
+            window_ = nullptr;
+        }
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
     default:
-        return DefWindowProcW(window_, message, wParam, lParam);
+        return DefWindowProcW(window, message, wParam, lParam);
     }
 }
 

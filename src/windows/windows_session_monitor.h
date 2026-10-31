@@ -25,14 +25,20 @@ public:
     void run();
 
 private:
+    friend struct WindowsSessionMonitorTestAccess;
+
     static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
-    LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
+    LRESULT handleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+    HWND createWindow();
+    void destroyWindow();
+    void releaseWindowResources(HWND window);
 
     HWND window_{};
     EventHandler onEvent_;
     StopHandler onStop_;
     TickHandler onTick_;
     bool registeredForSessionNotifications_{};
+    bool timerSet_{};
 };
 
 } // namespace chronox

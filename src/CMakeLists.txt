@@ -73,4 +73,28 @@ if(BUILD_TESTING)
         target_compile_options(chronox_storage_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME chronox_storage_tests COMMAND chronox_storage_tests)
+
+    if(WIN32)
+        add_executable(chronox_windows_session_monitor_tests
+            tests/windows_session_monitor_tests.cpp
+            windows/windows_session_monitor.cpp
+        )
+        target_include_directories(chronox_windows_session_monitor_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/windows
+        )
+        target_link_libraries(chronox_windows_session_monitor_tests PRIVATE
+            chronox_core Wtsapi32 User32
+        )
+        target_compile_features(chronox_windows_session_monitor_tests PRIVATE cxx_std_20)
+        target_compile_definitions(chronox_windows_session_monitor_tests PRIVATE
+            UNICODE _UNICODE WINVER=0x0A00 _WIN32_WINNT=0x0A00
+        )
+        if(MSVC)
+            target_compile_options(chronox_windows_session_monitor_tests PRIVATE
+                /W4 /permissive-
+            )
+        endif()
+        add_test(NAME chronox_windows_session_monitor_tests
+                 COMMAND chronox_windows_session_monitor_tests)
+    endif()
 endif()
