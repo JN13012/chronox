@@ -58,3 +58,7 @@ d’heure sont pris en compte dans les limites calendaires locales.
 Voir [docs/SPEC.md](docs/SPEC.md) pour le périmètre, les règles de mesure et les
 vérifications manuelles. Voir [docs/PERFORMANCE.md](docs/PERFORMANCE.md) pour
 les mesures réellement effectuées et le protocole d’audit Windows restant.
+Voir [docs/PRODUCT_VISION.md](docs/PRODUCT_VISION.md) pour la vision produit,
+les principes de confidentialité et les modes d’interface envisagés. Voir
+[docs/ROADMAP.md](docs/ROADMAP.md) pour les étapes proposées et leurs questions
+à valider ; elles ne constituent pas des engagements de livraison.
