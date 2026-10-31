@@ -30,6 +30,70 @@ doivent pas être incorporés tels quels dans l’application. Les ressources
 finales, leur licence, leur transparence et leur optimisation devront être
 validées séparément.
 
+## Premières ressources du widget — provisoires
+
+Les originaux ont été conservés dans Downloads. Les copies ci-dessous ont été
+importées sans conversion ni retouche ; leurs empreintes SHA-256 correspondent
+aux fichiers sources.
+
+| Couche | Ressource | Source conservée | Dimensions / format | Poids | SHA-256 |
+|---|---|---|---|---:|---|
+| Coque métallique | [`assets/ui/chronox-shell.png`](../assets/ui/chronox-shell.png) | `Image ChatGPT 31 oct. 2026, 13_11_34-1.png` | 1254 × 1254, PNG RGBA 8 bits | 1 119 398 octets (1,07 MiB) | `D644CF982EE0DC820F840C4FAD03CE2AC5899A69C3C0B964E38235044771C58D` |
+| Fond du cadran | [`assets/ui/chronox-dial-background.png`](../assets/ui/chronox-dial-background.png) | `Image ChatGPT 31 oct. 2026, 13_11_35-2.png` | 1254 × 1254, PNG RGBA 8 bits | 1 775 427 octets (1,69 MiB) | `7A73E864785C59ADBE419830DA783407935A760CF819AB95FD3307A552A66A5C` |
+
+Les deux images possèdent un véritable canal alpha. Sur la coque, environ
+68,39 % des pixels ont un alpha nul et 31,56 % un alpha partiel ; les zones
+transparentes extérieures et l’ouverture centrale ne sont pas un fond noir
+opaque. Un halo bleu et gris à faible opacité entoure la coque ; il est visible
+sur fond clair et doit être vérifié sur plusieurs fonds lors du prototype.
+Quelques pixels entièrement transparents contiennent des valeurs RGB
+résiduelles ; le décodage et le rééchantillonnage doivent respecter l’alpha
+pour éviter une frange.
+
+Le fond de cadran a également une transparence réelle : environ 41,03 % de
+pixels transparents, 58,89 % à alpha partiel et 0,08 % opaques. Son disque
+intérieur est une illustration sombre de Chronos, non un aplat noir opaque.
+L’aperçu sur fond clair ne révèle pas de fond noir ajouté ni de bord rectangulaire
+opaque. La séparation des deux ressources est cohérente avec l’identité visuelle
+attendue.
+
+Ces fichiers sont **provisoires, pas prêts pour la production**. Leur poids
+cumulé est d’environ 2,76 MiB avant toute optimisation. La provenance et les
+droits d’utilisation des images, le rendu des halos sur fonds variés, les
+artefacts éventuels après redimensionnement et la qualité finale aux tailles
+réelles restent à valider. Ne pas supprimer le halo ni convertir du noir en
+transparence automatiquement ; toute retouche nécessiterait une validation
+visuelle explicite.
+
+### Composition proposée
+
+- Utiliser un même repère carré de 1254 × 1254 pour les deux couches, centrées
+  sur le widget. Dessiner le fond du cadran dans l’ouverture, puis la coque
+  transparente à sa taille complète pour masquer proprement les bords et
+  former le cadre.
+- Bien que les canevas aient les mêmes dimensions, le disque visible du fond
+  (environ 1090 px de diamètre à alpha élevé) est plus large que l’ouverture
+  mesurée de la coque (environ 827 px sur la ligne centrale). Une superposition
+  temporaire suggère de dessiner le fond à environ **80 %** de l’échelle de la
+  coque, centré, puis de laisser la coque recouvrir le bord. C’est une valeur
+  initiale de prototype, pas une constante validée ; ajuster taille et position
+  à l’œil sur l’ensemble de la circonférence pour éviter un liseré clair ou un
+  recouvrement visible du métal.
+- À cette échelle, le rectangle du fond serait d’environ 176 px pour une coque
+  de 220 px et 280 px pour une coque de 350 px, avant ajustement DPI. Conserver
+  le ratio d’aspect ; ne pas étirer indépendamment largeur et hauteur.
+- Rendre par-dessus une troisième couche entièrement dynamique : compteurs,
+  textes, graduations, anneaux, progression, état de session et commandes de
+  navigation. Ces éléments et leurs zones d’interaction restent natifs ; ils
+  ne doivent pas être aplatis dans les PNG.
+- Clipper les éléments du cadran à son ouverture. Les boutons natifs peuvent
+  être dessinés au-dessus des couches statiques, avec des zones de hit-test
+  Win32 distinctes de leur apparence.
+- Décoder les PNG avec une voie Windows respectant leur alpha (par exemple
+  WIC), composer avec alpha prémultiplié correctement et rééchantillonner avec
+  un filtre de bonne qualité. Mettre en cache les bitmaps à l’échelle utile ;
+  les reconstruire seulement au changement de taille/DPI, pas à chaque rendu.
+
 ## Identité graphique cible
 
 - Chronomètre tridimensionnel premium, en titane argenté brossé.
