@@ -61,15 +61,17 @@ qualifiée automatiquement de temps de travail réellement effectué.
 ## Interface proposée
 
 La version actuelle est une application console ; aucune interface graphique
-n’est implémentée. Les modes suivants sont des propositions à prototyper et à
-évaluer, sans direction artistique ni forme de widget arrêtée.
+n’est implémentée. Une référence artistique a été sélectionnée pour le
+prototype V0.4 : chronomètre en titane sombre, accents bleus et cadran
+circulaire. Elle ne constitue pas un choix de ressources de production ni une
+validation de l’architecture graphique. Les exigences et questions ouvertes
+sont détaillées dans la [spécification UI V0.4](./UI_SPEC.md).
 
 ### Widget flottant compact
 
-Un affichage facultatif, compact et déplaçable pourrait montrer le compteur en
-temps réel. Il devrait pouvoir être masqué et ne pas gêner l’utilisation des
-autres applications. La forme, le comportement au premier plan et les options
-de déplacement restent à concevoir.
+La cible V0.4 décrit un widget facultatif, compact et déplaçable, avec des
+états rétracté, compact et agrandi. Son intégration et ses interactions restent
+à prototyper ; les tailles indiquées par la spécification UI sont indicatives.
 
 ### Widget étendu et application principale
 
@@ -89,8 +91,9 @@ applicatif et de choix explicites sur les données conservées.
 Une interface native Win32 utilisant Direct2D et DirectWrite est une piste
 technique à valider par un prototype, notamment pour l’accessibilité, la
 maintenance, les performances et les besoins réels de rendu. Cette piste
-n’est pas une décision d’architecture définitive. La direction artistique,
-l’apparence, la forme et l’interaction du widget restent ouvertes.
+n’est pas une décision d’architecture définitive. La référence artistique
+sert de cible de conception, mais les ressources finales, les dimensions,
+l’apparence détaillée et les interactions restent à valider.
 
 ## Données et confiance
 

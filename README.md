@@ -62,3 +62,5 @@ Voir [docs/PRODUCT_VISION.md](docs/PRODUCT_VISION.md) pour la vision produit,
 les principes de confidentialité et les modes d’interface envisagés. Voir
 [docs/ROADMAP.md](docs/ROADMAP.md) pour les étapes proposées et leurs questions
 à valider ; elles ne constituent pas des engagements de livraison.
+Voir [docs/UI_SPEC.md](docs/UI_SPEC.md) pour la spécification proposée de
+l’interface V0.4 et sa référence artistique.

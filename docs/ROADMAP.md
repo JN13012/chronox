@@ -33,7 +33,9 @@ Proposition de périmètre :
 À valider : interactions, accessibilité, comportement multi-écran, contrôles de
 visibilité, expérience au démarrage et technologie d’interface. Win32 avec
 Direct2D/DirectWrite est une piste à prototyper, pas un choix définitif. Voir
-les modes décrits dans la [vision produit](./PRODUCT_VISION.md).
+la [spécification UI V0.4](./UI_SPEC.md) et la
+[vision produit](./PRODUCT_VISION.md). La référence artistique y est
+documentée ; l’interface et ses comportements ne sont pas encore implémentés.
 
 ### V0.5 — Chronologie applicative
 
