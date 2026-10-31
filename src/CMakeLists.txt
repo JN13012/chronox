@@ -40,15 +40,38 @@ else()
 endif()
 
 if(WIN32)
-    add_executable(chronox
+    add_executable(chronox WIN32
+        windows/chronox_widget.cpp
         windows/main.cpp
+        windows/widget_presentation.cpp
         windows/windows_session_monitor.cpp
     )
-    target_link_libraries(chronox PRIVATE chronox_storage Wtsapi32 User32)
-    target_compile_definitions(chronox PRIVATE UNICODE _UNICODE WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+    target_link_libraries(chronox PRIVATE
+        chronox_storage
+        Wtsapi32
+        User32
+        Shell32
+        Ole32
+        Windowscodecs
+        D2d1
+        Dwrite
+    )
+    target_compile_definitions(chronox PRIVATE
+        UNICODE
+        _UNICODE
+        NOMINMAX
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+    )
     if(MSVC)
         target_compile_options(chronox PRIVATE /W4 /permissive-)
     endif()
+    add_custom_command(TARGET chronox POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_SOURCE_DIR}/assets/ui"
+            "$<TARGET_FILE_DIR:chronox>/assets/ui"
+        VERBATIM
+    )
 endif()
 
 if(BUILD_TESTING)
@@ -73,6 +96,18 @@ if(BUILD_TESTING)
         target_compile_options(chronox_storage_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME chronox_storage_tests COMMAND chronox_storage_tests)
+
+    add_executable(chronox_widget_tests
+        tests/widget_presentation_tests.cpp
+        windows/widget_presentation.cpp
+    )
+    target_compile_features(chronox_widget_tests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(chronox_widget_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(chronox_widget_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME chronox_widget_tests COMMAND chronox_widget_tests)
 
     if(WIN32)
         add_executable(chronox_windows_session_monitor_tests

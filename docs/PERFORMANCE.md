@@ -2,11 +2,56 @@
 
 ## Résultats effectivement mesurés
 
-Les outils CMake, MSVC, CTest, `dumpbin`, WPA et Application Verifier ne sont
-pas installés sur la machine Windows de développement. Il n’a donc pas été
-possible de produire ni d’exécuter `chronox.exe` sous Windows. Les mesures
-ci-dessous sont des mesures **Release portables sous WSL2** ; elles ne
-représentent pas les performances d’un processus Windows ou d’un build MSVC.
+Le prototype P1 a été configuré, compilé et exécuté sous Windows en MSVC
+Release. Les mesures Windows ci-dessous sont de courts échantillons de
+processus ; elles ne constituent pas un profil prolongé, un audit de fuites ni
+une validation sur d’autres PC. WPR, `dumpbin` et Application Verifier étaient
+installés ; `dumpbin` a servi à inspecter les imports du binaire. Les traces WPR
+et Application Verifier n’ont pas été exécutées, et WPA n’était pas disponible.
+
+Environnement de la mesure : Windows 11 Famille, build 26300, MSVC 19.44.35229,
+Windows SDK 10.0.26100. Le widget et la console ont été lancés avec un
+`LOCALAPPDATA` temporaire distinct afin de ne pas toucher à l’historique
+personnel. Le binaire P1 final et ses ressources ont été construits dans
+`build\src\Release`. Le poste était déverrouillé pendant les échantillons.
+
+### Échantillons du processus Windows Release
+
+CPU « un cœur » = delta du temps CPU du processus divisée par le temps mural,
+exprimé en pourcentage d’un processeur logique. Les compteurs du processus ont
+été lus une fois par seconde avec `System.Diagnostics.Process`. Les valeurs
+mémoire, handles et threads sont les moyennes des relevés.
+
+| État | Échauffement + échantillon | CPU moyen / p95 (un cœur) | Mémoire privée moyenne | Working set moyen | Handles moyens | Threads moyens |
+|---|---:|---:|---:|---:|---:|---:|
+| Console Release, moteur existant | 5 s + 30 s | 0 / 0 % | 1 653 965 octets | 9 917 235 octets | 120 | 3,6 |
+| P1, widget déployé et suivi actif | 10 s + 30 s | 0,1544 / 1,5441 % | 8 043 042 octets | 26 411 418 octets | 243 | 13,9 |
+| P1, languette rétractée et suivi actif | 2 s + 30 s après repli | 0 / 0 % | 8 025 156 octets | 25 891 362 octets | 243 | 13,4 |
+
+La fenêtre P1 mesurée était de 250 × 250 pixels à 100 % DPI ; sa coque visible
+fait environ 220 px. Après repli, sa fenêtre faisait 34 × 76 px. Le timer de
+redessin du widget est arrêté en état rétracté ; le CPU mesuré était inférieur
+à la résolution des relevés durant les 30 secondes observées. « 0 % » ne
+garantit pas une inactivité permanente.
+
+Les tailles des exécutables Release sur cette configuration étaient de
+1 145 344 octets pour la console existante et 1 174 528 octets pour P1 après la
+validation finale. Les ressources PNG fournies sont copiées à côté du nouvel
+exécutable ; le dossier doit être conservé avec celui-ci. P1 utilisait environ
+6,39 MB de mémoire privée, 16,49 MB de working set, 123 handles et 10 threads
+de plus que la console dans ces échantillons. Le coût mémoire/handles/threads
+des composants Win32, WIC, Direct2D et DirectWrite est donc mesurable et non
+nul ; il reste à évaluer avec WPR/WPA et sur plusieurs configurations.
+
+Ces relevés courts ne testent pas plusieurs heures de stabilité, les transitions
+de veille ni la croissance mémoire dans le temps. La moyenne CPU de la console
+était à 0 % pendant l’échantillon ; la comparaison n’établit pas un coût CPU
+représentatif de toutes les scènes ou machines.
+
+### Mesures portables antérieures sous WSL2
+
+Les valeurs suivantes concernent uniquement des tests Linux Release ; elles ne
+représentent pas les performances de l’interface ou d’un processus Windows.
 
 Environnement des mesures portables : AMD Ryzen 7 7735HS, machine à 16
 processeurs logiques, WSL2 Linux 6.18, GCC 15.2, CMake 4.4.4. La compilation
@@ -55,42 +100,46 @@ intervalles anciens, sans seuil de temps dépendant de la machine.
 
 ## Audit statique du comportement
 
-- **Repos CPU :** le moniteur attend dans `GetMessageW`; il n’y a pas de boucle
-  de polling. Le timer Windows se déclenche une fois par minute. Les rapports
-  ne sont recalculés qu’au démarrage, au timer et lors d’une transition.
-  Aucun pourcentage CPU au repos ou lors d’événements n’a été mesuré sous
-  Windows.
+- **Repos CPU :** la boucle de messages Windows attend dans `GetMessageW`; il
+  n’y a pas de boucle de polling. Le moniteur de session garde son timer d’une
+  minute. Le widget actualise ses valeurs à la seconde seulement s’il est
+  visible, déployé et que le suivi compte ; le timer s’arrête lorsqu’il est
+  rétracté ou en pause. Les courts échantillons Windows sont indiqués plus
+  haut.
 - **Écritures SQLite :** une transition ouvre ou ferme un intervalle dans une
   transaction. Tant qu’un intervalle est actif, le timer sauvegarde son point
   de contrôle au plus une fois par minute. SQLite est en journal DELETE avec
   `synchronous=FULL`. Quand le compteur est inactif, le point de contrôle ne
   modifie pas la base.
-- **Mémoire et allocations :** le code ne charge pas l’historique en mémoire ;
-  les rapports sont des agrégats SQL. Les statements sont finalisés par RAII,
-  les connexions SQLite sont fermées par l’objet de stockage, et les ressources
-  WTS, fenêtre, notifications, timer et mutex ont des chemins de libération.
-  Aucun profil d’allocations ou test de fuite Win32 n’a été réalisé.
-- **Threads et handles :** l’application n’ajoute pas de thread applicatif.
-  Elle utilise la boucle de messages Windows, une fenêtre cachée, un mutex
-  d’instance et une connexion SQLite. Le nombre de handles et de threads du
-  processus Windows n’a pas été mesuré.
+- **Mémoire et allocations :** les images sont réduites à la taille du widget
+  avant la mise en cache Direct2D ; le processus n’alloue pas un bitmap de
+  1254 × 1254 pixels par couche. Les compteurs Release observés sont indiqués
+  plus haut. Aucun profil de tas, test de fuite Win32 ou essai de stabilité
+  prolongé n’a été réalisé.
+- **Threads et handles :** le code n’ajoute pas de thread applicatif dédié ;
+  les API et bibliothèques Windows créent cependant des threads internes.
+  Les compteurs réels du processus Release sont indiqués plus haut. Aucun
+  suivi de dérive des handles ou threads sur plusieurs heures n’a été fait.
 - **Verrouillage, veille et réveil :** le noyau automatisé couvre les
   transitions et le réveil d’une session verrouillée. Les notifications Win32
   réelles, l’écriture pendant la demande de veille et le comportement matériel
   n’ont pas été exercés sur ce PC.
-- **Exécutable et runtime :** aucune taille d’EXE ni liste des imports du build
-  MSVC n’est disponible. SQLite est compilé statiquement dans Chronox. Avec la
-  configuration MSVC par défaut de CMake, le runtime C/C++ est dynamique ; un
-  PC cible peut nécessiter le Microsoft Visual C++ Redistributable 2015–2022
-  x64. La version Windows et les imports doivent être confirmés sur l’EXE
-  Release réel.
+- **Exécutable et runtime :** les tailles des binaires Release sont indiquées
+  plus haut. `dumpbin /dependents` a confirmé les imports Win32, WTS, Shell,
+  OLE, Direct2D et DirectWrite, ainsi que `MSVCP140.dll`, `VCRUNTIME140.dll`,
+  `VCRUNTIME140_1.dll` et l’API-set CRT. SQLite est compilé statiquement.
+  Un PC cible où le runtime MSVC manque peut nécessiter Microsoft Visual C++
+  Redistributable 2015–2022 x64. WIC est activé via COM. La présence des outils
+  WPR et Application Verifier n’équivaut pas à un profil : aucun scénario de
+  diagnostic prolongé n’a été exécuté.
 
 ## Protocole reproductible sur Windows
 
-Exécuter les mesures sur le même PC, avec le même build Release, après avoir
-laissé Chronox démarrer et afficher ses rapports. Noter la version Windows, le
-CPU, le nombre de processeurs logiques, le commit, la taille et la date de
-l’exécutable. Ne pas mélanger les mesures Debug et Release.
+Pour compléter les mesures P1, exécuter les relevés sur plusieurs heures, dans
+les états déployé, rétracté, masqué et en pause, sur le même PC et build
+Release. Noter la version Windows, le CPU, le nombre de processeurs logiques,
+le commit, la taille et la date de l’exécutable. Ne pas mélanger Debug et
+Release.
 
 1. Construire et tester le binaire Release :
 

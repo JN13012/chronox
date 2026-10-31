@@ -3,14 +3,13 @@
 ## Statut et périmètre
 
 Cette spécification formalise la cible visuelle et fonctionnelle proposée pour
-l’interface V0.4. La référence artistique ci-dessous a été sélectionnée ; les
-choix de rendu et d’intégration restent à prototyper. Aucun élément graphique
-n’est encore implémenté.
+l’interface V0.4. La référence artistique ci-dessous a été sélectionnée. Le
+prototype P1 natif est maintenant implémenté ; les ressources et le rendu
+restent expérimentaux et doivent être validés en conditions réelles.
 
-Les éléments existants sont décrits comme **implémentés**. Les exigences de
-présentation de cette spécification sont la **cible validée pour le prototype
-V0.4**, sans préjuger de la faisabilité ni de la livraison. L’architecture et
-les comportements non confirmés sont **à valider**.
+Les éléments du prototype P1 sont décrits comme **implémentés** ; les
+fonctionnalités V0.4 restantes sont **proposées** ou **à valider**. La
+spécification ne constitue pas un engagement de livraison de la version finale.
 
 La spécification technique du suivi et des données reste celle de la
 [spécification V0](./SPEC.md). Cette interface ne change ni le moteur de suivi,
@@ -93,6 +92,41 @@ visuelle explicite.
   WIC), composer avec alpha prémultiplié correctement et rééchantillonner avec
   un filtre de bonne qualité. Mettre en cache les bitmaps à l’échelle utile ;
   les reconstruire seulement au changement de taille/DPI, pas à chaque rendu.
+
+## Prototype P1 — état d’implémentation
+
+Implémenté dans le prototype Windows :
+
+- fenêtre widget native transparente, positionnée en bas à droite de la zone de
+  travail principale, avec une coque dont le diamètre visible est proche de
+  220 px à 100 % DPI ;
+- coque et fond Chronos chargés depuis `assets\ui`, avec le fond centré à 80 %
+  et la coque dessinée par-dessus ;
+- rendu per-pixel alpha avec WIC, Direct2D et DirectWrite ; les bitmaps sont
+  réduits à l’échelle d’affichage et gardés en cache jusqu’au changement DPI ou
+  au basculement entre les états déployé et rétracté ;
+- cumul mesuré du jour, état actif/en pause et durée de suivi depuis le
+  lancement courant ;
+- languette de rétraction/déploiement et déplacement de la fenêtre par
+  glisser-déposer ;
+- icône de notification avec commandes afficher/masquer, épingler au premier
+  plan et quitter.
+
+Le rafraîchissement à la seconde est limité au widget visible et déployé tant
+que le moteur compte. Le code n’ajoute pas de thread applicatif ni de boucle
+d’attente active ; les transitions continuent d’être reçues par la fenêtre de
+monitoring existante, et la sauvegarde SQLite reste à son rythme d’une minute.
+Les bibliothèques Windows peuvent créer des threads internes, comme le montre
+le comptage du processus dans le [bilan de performance](./PERFORMANCE.md).
+
+Non inclus dans P1 : dashboard, navigation entre vues, arcs horaires, plage
+configurable, persistance des préférences et suivi applicatif. La languette et
+les ressources sont un prototype ; le positionnement multi-écrans, les DPI
+mixtes, l’accessibilité et l’affichage en plein écran restent à valider.
+
+Les mesures de consommation et les résultats de compilation Windows sont
+consignés dans le [protocole de performance](./PERFORMANCE.md) après leur
+exécution ; aucun résultat n’est présumé dans cette spécification.
 
 ## Identité graphique cible
 

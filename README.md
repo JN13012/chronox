@@ -1,9 +1,10 @@
 # Chronox
 
-Chronox est un utilitaire natif Windows 10/11 en C++20 qui mesure le temps
+Chronox est une application native Windows 10/11 en C++20 qui mesure le temps
 pendant lequel la session utilisateur est déverrouillée et le PC éveillé.
-L’application s’exécute en console, sans serveur, service cloud ni interface
-graphique. Les intervalles sont conservés dans une base SQLite locale.
+Le prototype du widget V0.4 affiche le cumul du jour et l’état de session.
+L’application fonctionne localement, sans serveur ni service cloud ; les
+intervalles sont conservés dans une base SQLite.
 
 ## Construire
 
@@ -30,23 +31,26 @@ Depuis PowerShell à la racine du dépôt :
 .\build\src\Release\chronox.exe
 ```
 
-Le programme crée `%LOCALAPPDATA%\Chronox\chronox.db` au premier lancement. La
-base SQLite est liée statiquement ; le runtime MSVC est utilisé selon la
+Le programme crée `%LOCALAPPDATA%\Chronox\chronox.db` au premier lancement et
+charge les ressources PNG depuis `assets\ui`, livré à côté de `chronox.exe`.
+La base SQLite est liée statiquement ; le runtime MSVC est utilisé selon la
 configuration CMake par défaut. Un PC qui ne possède pas déjà le runtime peut
 nécessiter le Microsoft Visual C++ Redistributable 2015–2022 x64.
 
-Après la réussite complète du workflow Windows, `chronox.exe` est aussi
-téléchargeable comme artefact `chronox-windows-x64` dans l’exécution GitHub
-Actions correspondante. Aucun installateur n’est fourni.
+Après la réussite complète du workflow Windows, l’exécutable et ses ressources
+`assets\ui` sont téléchargeables comme artefact `chronox-windows-x64` dans
+l’exécution GitHub Actions correspondante. Aucun installateur n’est fourni.
 
 ## Données et rapports
 
 La base est créée automatiquement dans
 `%LOCALAPPDATA%\Chronox\chronox.db`. Elle conserve les périodes de mesure après
-la fermeture de Chronox et le redémarrage de Windows. Au lancement, la console
-affiche les cumuls du jour, de la semaine (lundi à dimanche), du mois et de
-l’année courants, selon le fuseau horaire local. Ils sont actualisés à chaque
-transition et chaque minute.
+la fermeture de Chronox et le redémarrage de Windows. Le widget affiche le
+cumul du jour selon le fuseau horaire local et l’état de session. Le moteur
+conserve également les rapports semaine (lundi à dimanche), mois et année ; le
+dashboard qui les présentera n’est pas inclus dans P1. L’affichage se met à
+jour lors des transitions et chaque seconde uniquement lorsque le widget est
+déployé et que le suivi compte.
 
 Une période encore en cours est sauvegardée au moins une fois par minute. Si
 Chronox s’arrête brutalement, la récupération clôt cette période à son dernier

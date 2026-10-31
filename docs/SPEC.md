@@ -2,7 +2,8 @@
 
 ## Périmètre
 
-Chronox est un programme console natif Windows 10/11, écrit en C++20. Il mesure
+Chronox est une application native Windows 10/11, écrite en C++20. Le prototype
+P1 du widget V0.4 affiche le temps mesuré et l’état de session. Le moteur mesure
 la durée pendant laquelle **la session Windows courante est déverrouillée et
 l’ordinateur éveillé simultanément**.
 
@@ -10,14 +11,16 @@ Inclus :
 
 - état initial de verrouillage interrogé au lancement ;
 - notifications Windows de verrouillage/déverrouillage et de veille/réveil ;
-- temps cumulé affiché avec les transitions d’état et par jour, semaine, mois
-  et année ;
+- temps cumulé et état de session affichés dans le widget ; rapports du moteur
+  par jour, semaine, mois et année ;
 - historique local persistant SQLite ;
 - noyau de transition et calculs calendaires indépendants de Win32, avec tests
-  automatisés.
+  automatisés ;
+- widget Win32 natif avec ressources PNG transparentes, rendu WIC,
+  Direct2D/DirectWrite, languette rétractable et icône de notification.
 
-Exclus : interface graphique, service Windows, serveur, service cloud et
-mesure antérieure au démarrage du programme.
+Exclus : dashboard, historique graphique, suivi des applications, service
+Windows, serveur, service cloud et mesure antérieure au démarrage du programme.
 
 ## Règles de comptabilisation
 
@@ -51,8 +54,21 @@ mesure antérieure au démarrage du programme.
 - Les événements redondants ne changent pas l’état ni le cumul. Les événements
   de verrouillage/déverrouillage reçus pendant la veille mettent à jour l’état
   de session sans faire tourner le compteur.
-- Le cumul de l’intervalle courant et les quatre rapports sont affichés au
-  démarrage, à chaque transition, puis chaque minute pendant l’exécution.
+- Le widget P1 affiche le cumul local du jour, l’état de session et la durée
+  cumulée par le tracker depuis le lancement courant. Il rafraîchit l’affichage
+  une fois par seconde seulement lorsque le widget est déployé et que le suivi
+  compte ; le timer de persistance reste à une minute.
+- La fenêtre est positionnée au démarrage en bas à droite de la zone de travail
+  du moniteur principal, au-dessus de la barre des tâches. Une languette permet
+  de la rétracter ou de la déployer. L’icône de notification permet de masquer,
+  restaurer, épingler temporairement au premier plan ou quitter Chronox.
+- Les bitmaps PNG sont décodés et mis en cache à la taille du widget ; les
+  éléments textuels et l’état sont dessinés par Direct2D/DirectWrite. Les
+  ressources fournies restent provisoires ; leur composition est documentée
+  dans la [spécification UI](./UI_SPEC.md).
+- Les préférences de position, d’état et d’épinglage ne sont pas persistées
+  dans P1. Le dashboard, les anneaux horaires et la navigation entre vues ne
+  sont pas implémentés.
 
 ## Cas limites
 
@@ -63,7 +79,7 @@ mesure antérieure au démarrage du programme.
 | Ordre initial « veille/réveil » absent | Le processus démarre éveillé ; il ne compte qu’à partir de son lancement. |
 | Notifications identiques répétées | Aucun double départ ni ajout de durée. |
 | Verrouillage pendant la veille | L’état reste inactif ; le réveil ne reprend pas le compteur. |
-| Arrêt normal | L’intervalle est fermé et sauvegardé avant l’affichage du cumul final. |
+| Arrêt normal | L’intervalle est fermé et sauvegardé avant la fermeture du widget. |
 | Arrêt inattendu | La récupération conserve au plus le temps jusqu’au dernier point de sauvegarde ; le temps hors processus n’est pas compté. |
 | Redémarrage de Chronox | Les anciens intervalles restent disponibles et une nouvelle période débute à l’état Windows initial. |
 | Changement d’heure | Les intervalles restent en UTC ; les rapports suivent les limites calendaires locales, y compris les journées de 23 ou 25 heures. |
