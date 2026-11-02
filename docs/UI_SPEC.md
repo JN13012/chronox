@@ -109,8 +109,9 @@ Implémenté dans le prototype Windows :
   lancement courant ;
 - languette de rétraction/déploiement et déplacement de la fenêtre par
   glisser-déposer ;
-- icône de notification avec commandes afficher/masquer, épingler au premier
-  plan et quitter.
+- icône officielle Chronox intégrée à l’exécutable et utilisée dans la zone de
+  notification, avec commandes afficher/masquer, épingler au premier plan et
+  quitter. L’ICO fournit les tailles de 16 × 16 à 256 × 256 pixels.
 
 Le rafraîchissement à la seconde est limité au widget visible et déployé tant
 que le moteur compte. Le code n’ajoute pas de thread applicatif ni de boucle

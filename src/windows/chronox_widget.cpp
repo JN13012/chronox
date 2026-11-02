@@ -1,5 +1,6 @@
 #include "chronox_widget.h"
 
+#include "resource.h"
 #include "widget_presentation.h"
 
 #include <windows.h>
@@ -368,7 +369,11 @@ struct ChronoxWidget::Impl {
         data.uID = TrayIconId;
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         data.uCallbackMessage = TrayCallbackMessage;
-        data.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        data.hIcon = LoadIconW(GetModuleHandleW(nullptr),
+                               MAKEINTRESOURCEW(IDI_CHRONOX));
+        if (data.hIcon == nullptr) {
+            throw windowsError("LoadIconW(Chronox)", GetLastError());
+        }
         const auto tooltip = makeTooltip();
         wcsncpy_s(data.szTip, tooltip.c_str(), _TRUNCATE);
         if (!Shell_NotifyIconW(NIM_ADD, &data)) {

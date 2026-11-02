@@ -41,10 +41,14 @@ endif()
 
 if(WIN32)
     add_executable(chronox WIN32
+        windows/chronox.rc
         windows/chronox_widget.cpp
         windows/main.cpp
         windows/widget_presentation.cpp
         windows/windows_session_monitor.cpp
+    )
+    target_include_directories(chronox PRIVATE
+        "${PROJECT_SOURCE_DIR}"
     )
     target_link_libraries(chronox PRIVATE
         chronox_storage
