@@ -64,6 +64,16 @@ sauvegarde cohérente par SQLite vers un nouveau fichier, sans planification
 automatique. Une seule instance peut suivre la session Windows à la fois. Les
 changements d’heure sont pris en compte dans les limites calendaires locales.
 
+Le menu de l’icône de notification permet d’activer explicitement le démarrage
+avec Windows. L’option utilise HKCU sans élévation et reste désactivée par
+défaut. Lorsque l’option est active, une nouvelle version est copiée dans un
+sous-dossier versionné de `%LOCALAPPDATA%\Programs\Chronox` avant la mise à jour
+de l’entrée de démarrage ; les fichiers d’une version en cours ne sont pas
+écrasés. Les ressources PNG sont vérifiées avant l’activation. Les mises à jour
+ne réactivent pas un démarrage désactivé depuis Windows. Les anciens dossiers
+de version ne sont pas supprimés automatiquement pour éviter d’effacer un
+exécutable encore utilisé.
+
 Voir [docs/SPEC.md](docs/SPEC.md) pour le périmètre, les règles de mesure et les
 vérifications manuelles. Voir [docs/PERFORMANCE.md](docs/PERFORMANCE.md) pour
 les mesures réellement effectuées et le protocole d’audit Windows restant.

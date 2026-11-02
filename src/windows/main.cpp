@@ -1,5 +1,6 @@
 #include "chronox_widget.h"
 #include "windows_session_monitor.h"
+#include "windows_startup.h"
 
 #include "../core/calendar_period.h"
 #include "../core/utc_timestamp_clock.h"
@@ -15,12 +16,15 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 namespace {
 
 using chronox::SessionEvent;
 using chronox::SessionTracker;
+
+class QuietDuplicateInstance {};
 
 class ComApartment {
 public:
@@ -42,7 +46,7 @@ public:
 
 class SingleInstanceGuard {
 public:
-    SingleInstanceGuard() {
+    explicit SingleInstanceGuard(bool quietIfAlreadyRunning) {
         SetLastError(ERROR_SUCCESS);
         mutex_ = CreateMutexW(nullptr, TRUE, L"Local\\Chronox.SessionMonitor");
         if (mutex_ == nullptr) {
@@ -51,6 +55,9 @@ public:
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
             CloseHandle(mutex_);
             mutex_ = nullptr;
+            if (quietIfAlreadyRunning) {
+                throw QuietDuplicateInstance{};
+            }
             throw std::runtime_error(
                 "Chronox is already running for this Windows session");
         }
@@ -113,7 +120,9 @@ void reportError(const std::exception& error) {
                 MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
 }
 
-int runChronox() {
+int runChronox(bool startHidden,
+               bool quietIfAlreadyRunning,
+               chronox::WindowsStartup& startup) {
     if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) &&
         GetLastError() != ERROR_ACCESS_DENIED) {
         const DWORD error = GetLastError();
@@ -122,7 +131,7 @@ int runChronox() {
             std::to_string(error));
     }
 
-    SingleInstanceGuard instanceGuard;
+    SingleInstanceGuard instanceGuard(quietIfAlreadyRunning);
     ComApartment comApartment;
 
     std::optional<SessionTracker> tracker;
@@ -212,8 +221,13 @@ int runChronox() {
                     tracker->isCounting()};
             },
             stop,
-            captureError);
-        widget->create();
+            captureError,
+            [&] { return startup.state(); },
+            [&] {
+                startup.setEnabled(
+                    startup.state() != chronox::StartupState::Enabled);
+            });
+        widget->create(!startHidden);
         monitor.run();
     } catch (...) {
         const auto runError = std::current_exception();
@@ -230,9 +244,18 @@ int runChronox() {
 
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     try {
-        return runChronox();
+        chronox::WindowsStartup startup;
+        const bool installedVersionChanged =
+            startup.synchronizeInstalledVersion();
+        const bool startHidden =
+            commandLine != nullptr &&
+            std::wstring_view(commandLine) == L"--startup";
+        return runChronox(startHidden,
+                          startHidden || installedVersionChanged, startup);
+    } catch (const QuietDuplicateInstance&) {
+        return 0;
     } catch (const std::exception& error) {
         reportError(error);
         return 1;

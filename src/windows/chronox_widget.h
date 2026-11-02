@@ -1,5 +1,7 @@
 #pragma once
 
+#include "windows_startup.h"
+
 #include <chrono>
 #include <exception>
 #include <functional>
@@ -18,16 +20,20 @@ public:
     using SnapshotProvider = std::function<WidgetSnapshot()>;
     using ExitHandler = std::function<void()>;
     using ErrorHandler = std::function<void(std::exception_ptr)>;
+    using StartupStateProvider = std::function<StartupState()>;
+    using StartupToggleHandler = std::function<void()>;
 
     ChronoxWidget(SnapshotProvider snapshotProvider,
                   ExitHandler exitHandler,
-                  ErrorHandler errorHandler);
+                  ErrorHandler errorHandler,
+                  StartupStateProvider startupStateProvider,
+                  StartupToggleHandler startupToggleHandler);
     ~ChronoxWidget();
 
     ChronoxWidget(const ChronoxWidget&) = delete;
     ChronoxWidget& operator=(const ChronoxWidget&) = delete;
 
-    void create();
+    void create(bool showInitially = true);
     void refresh();
 
 private:

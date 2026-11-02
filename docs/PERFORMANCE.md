@@ -203,3 +203,25 @@ Release.
    vérifier les runtimes Visual C++ indiqués par les imports.
 
 Les étapes Windows ci-dessus restent à exécuter avec un build MSVC Release réel.
+
+## Validation P1.2 — 2 novembre 2026
+
+Environnement : MSVC 19.44.35229, MSBuild 17.14.60, SDK Windows 10.0.26100.0.
+Le build Release complet et les tests ont été exécutés dans un répertoire
+isolé sous `%TEMP%`, car l’exécutable Release du dépôt était déjà utilisé par
+une instance existante. Aucune instance n’a été arrêtée et aucun test n’a
+ouvert `%LOCALAPPDATA%\Chronox\chronox.db`.
+
+| Vérification | Résultat |
+|---|---|
+| Configuration CMake x64 et build complet Release | Réussis |
+| CTest Release | 5/5 suites réussies en 1,63 s |
+| Suites | noyau, stockage SQLite, présentation widget, moniteur Windows, démarrage Windows |
+| Base utilisateur | Non utilisée ; les tests de stockage créent des bases temporaires |
+| Registre Run utilisateur | Non modifié ; le test startup utilise et nettoie une clé HKCU isolée |
+
+MSBuild a émis l’avertissement `MSB8029` parce que le répertoire de validation
+était sous `%TEMP%` ; la compilation et l’édition de liens ont néanmoins
+réussi. Ces tests automatisés ne remplacent pas les scénarios interactifs de
+démarrage de session, Task Manager, veille/réveil ni l’essai de stabilité de
+24 heures ; ceux-ci restent à exécuter sur Windows.

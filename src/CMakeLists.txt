@@ -46,6 +46,7 @@ if(WIN32)
         windows/main.cpp
         windows/widget_presentation.cpp
         windows/windows_session_monitor.cpp
+        windows/windows_startup.cpp
     )
     target_include_directories(chronox PRIVATE
         "${PROJECT_SOURCE_DIR}"
@@ -55,6 +56,7 @@ if(WIN32)
         Wtsapi32
         User32
         Shell32
+        Advapi32
         Ole32
         Windowscodecs
         D2d1
@@ -135,5 +137,27 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME chronox_windows_session_monitor_tests
                  COMMAND chronox_windows_session_monitor_tests)
+
+        add_executable(chronox_windows_startup_tests
+            tests/windows_startup_tests.cpp
+            windows/windows_startup.cpp
+        )
+        target_include_directories(chronox_windows_startup_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/windows
+        )
+        target_compile_features(chronox_windows_startup_tests PRIVATE cxx_std_20)
+        target_compile_definitions(chronox_windows_startup_tests PRIVATE
+            UNICODE _UNICODE NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00
+        )
+        target_link_libraries(chronox_windows_startup_tests PRIVATE
+            Advapi32 Ole32
+        )
+        if(MSVC)
+            target_compile_options(chronox_windows_startup_tests PRIVATE
+                /W4 /permissive-
+            )
+        endif()
+        add_test(NAME chronox_windows_startup_tests
+                 COMMAND chronox_windows_startup_tests)
     endif()
 endif()

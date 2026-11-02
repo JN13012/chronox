@@ -112,6 +112,9 @@ Implémenté dans le prototype Windows :
 - icône officielle Chronox intégrée à l’exécutable et utilisée dans la zone de
   notification, avec commandes afficher/masquer, épingler au premier plan et
   quitter. L’ICO fournit les tailles de 16 × 16 à 256 × 256 pixels.
+- option « Lancer Chronox avec Windows » dans le menu de la zone de notification,
+  désactivée par défaut ; le démarrage enregistré ouvre l’application dans la
+  zone de notification sans afficher le widget.
 
 Le rafraîchissement à la seconde est limité au widget visible et déployé tant
 que le moteur compte. Le code n’ajoute pas de thread applicatif ni de boucle
@@ -124,6 +127,12 @@ Non inclus dans P1 : dashboard, navigation entre vues, arcs horaires, plage
 configurable, persistance des préférences et suivi applicatif. La languette et
 les ressources sont un prototype ; le positionnement multi-écrans, les DPI
 mixtes, l’accessibilité et l’affichage en plein écran restent à valider.
+
+Le moteur expose également une API de lecture historique par période et date
+d’ancrage, sans dashboard : les intervalles sont les segments réellement
+comptabilisés, sans interprétation des interruptions. Le temps de session mesuré
+est distinct du temps de travail déclaré, qui reste indisponible faute de
+données déclaratives.
 
 Les mesures de consommation et les résultats de compilation Windows sont
 consignés dans le [protocole de performance](./PERFORMANCE.md) après leur
@@ -213,6 +222,9 @@ du dashboard au widget restent à confirmer durant le prototypage.
 - Animation de déploiement depuis le bord droit ; elle doit rester courte,
   discrète et pouvoir être désactivée si nécessaire.
 - Icône et commandes d’accès dans la zone de notification Windows.
+- Option utilisateur de démarrage automatique via HKCU, désactivée par défaut ;
+  au lancement automatique, garder le widget masqué et l’icône accessible dans
+  la zone de notification.
 - Option utilisateur pour afficher le widget au premier plan ; ce comportement
   ne doit pas être imposé par défaut sans validation.
 - Gérer les déplacements entre écrans, les écrans aux résolutions ou facteurs

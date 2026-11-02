@@ -11,7 +11,8 @@ après validation des besoins, des prototypes et des contraintes de qualité.
 
 - **Implémenté** : application console Windows native, mesure du temps de
   session déverrouillée et PC éveillé, stockage SQLite local et rapports par
-  périodes calendaires.
+  périodes calendaires ; widget Win32 P1, consultation historique en lecture
+  seule, validation SQLite et démarrage Windows optionnel P1.2.
 - **Décidé** : préserver ce périmètre fiable, local et léger avant d’ajouter
   une interface ou des mesures de nature différente. Les règles actuelles sont
   décrites dans la [spécification V0](./SPEC.md).
@@ -28,7 +29,7 @@ Proposition de périmètre :
 - widget compact affichant le compteur et pouvant être déplacé ou masqué ;
 - zone de notification Windows ;
 - widget étendu et dashboard initial ;
-- démarrage automatique configurable.
+- démarrage automatique configurable (implémenté en P1.2, désactivé par défaut).
 
 À valider : interactions, accessibilité, comportement multi-écran, contrôles de
 visibilité, expérience au démarrage et technologie d’interface. Win32 avec

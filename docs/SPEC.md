@@ -57,6 +57,17 @@ Windows, serveur, service cloud et mesure antérieure au démarrage du programme
   sous-estimée du temps écoulé depuis ce point de sauvegarde.
 - Un mutex Windows interdit deux instances simultanées dans la même session,
   afin qu’un démarrage ne récupère pas l’intervalle actif d’une autre instance.
+- Le démarrage avec Windows est une option utilisateur désactivée par défaut.
+  Elle utilise la valeur Run de HKCU et installe une copie par version sous
+  `%LOCALAPPDATA%\Programs\Chronox`. Les mises à jour publient une nouvelle
+  version côte à côte avant de déplacer l’entrée Run ; elles ne remplacent pas
+  l’exécutable éventuellement en cours d’utilisation. Les anciennes versions
+  ne sont pas supprimées automatiquement. Le lancement automatique démarre dans
+  la zone de notification sans afficher le widget.
+- L’état de la valeur `StartupApproved\Run` est lu pour refléter au mieux une
+  désactivation dans le Gestionnaire des tâches. Son format étant non
+  documenté, les états inconnus sont affichés comme tels ; une mise à jour ne
+  réactive pas un démarrage désactivé par Windows.
 - Les rapports jour, semaine (lundi à dimanche), mois et année calculent
   l’intersection des intervalles UTC avec les limites calendaires du fuseau
   local. Les journées de changement d’heure peuvent durer 23 ou 25 heures.
@@ -139,6 +150,14 @@ validés par une exécution Linux :
 8. Tester une fermeture de session et un arrêt/redémarrage. Le démarrage suivant
    doit conserver l’historique sans ajouter le temps pendant lequel le
    programme était arrêté.
+9. Activer explicitement « Lancer Chronox avec Windows », puis vérifier la
+   valeur HKCU, le démarrage discret et l’accès via l’icône de notification.
+   Désactiver l’option depuis Chronox et vérifier que l’entrée Run est retirée.
+   Désactiver ensuite le démarrage depuis le Gestionnaire des tâches et vérifier
+   que Chronox reflète cet état sans le réactiver lors d’une mise à jour.
+10. Avec un ancien processus encore actif, lancer une nouvelle build après
+    activation du démarrage : vérifier que les nouveaux fichiers sont publiés
+    dans un nouveau sous-dossier et que l’ancienne version n’est pas écrasée.
 
 Ces scénarios de verrouillage, veille et arrêt sur un vrai PC Windows ne sont
 pas validés par les seuls tests automatisés ou la CI.

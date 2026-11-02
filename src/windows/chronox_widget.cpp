@@ -33,6 +33,7 @@ constexpr UINT TrayIconId = 1;
 constexpr UINT MenuToggleWidget = 1001;
 constexpr UINT MenuAlwaysOnTop = 1002;
 constexpr UINT MenuExit = 1003;
+constexpr UINT MenuStartup = 1004;
 constexpr float CanvasSize = 250.0f;
 constexpr float CollapsedWidth = 34.0f;
 constexpr float CollapsedHeight = 76.0f;
@@ -69,10 +70,14 @@ std::wstring makeTooltip() {
 struct ChronoxWidget::Impl {
     Impl(SnapshotProvider snapshotProviderValue,
          ExitHandler exitHandlerValue,
-         ErrorHandler errorHandlerValue)
+         ErrorHandler errorHandlerValue,
+         StartupStateProvider startupStateProviderValue,
+         StartupToggleHandler startupToggleHandlerValue)
         : snapshotProvider(std::move(snapshotProviderValue)),
           exitHandler(std::move(exitHandlerValue)),
-          errorHandler(std::move(errorHandlerValue)) {}
+          errorHandler(std::move(errorHandlerValue)),
+          startupStateProvider(std::move(startupStateProviderValue)),
+          startupToggleHandler(std::move(startupToggleHandlerValue)) {}
 
     ~Impl() {
         removeTrayIcon();
@@ -89,6 +94,8 @@ struct ChronoxWidget::Impl {
     SnapshotProvider snapshotProvider;
     ExitHandler exitHandler;
     ErrorHandler errorHandler;
+    StartupStateProvider startupStateProvider;
+    StartupToggleHandler startupToggleHandler;
     HWND window{};
     bool windowClassRegistered{};
     bool expanded{true};
@@ -125,7 +132,7 @@ struct ChronoxWidget::Impl {
     UINT pixelHeight{};
     float targetDpi{96.0f};
 
-    void create() {
+    void create(bool showInitially) {
         shellPath = executableDirectory() / L"assets" / L"ui" / L"chronox-shell.png";
         dialPath =
             executableDirectory() / L"assets" / L"ui" / L"chronox-dial-background.png";
@@ -184,7 +191,9 @@ struct ChronoxWidget::Impl {
         snapshot = snapshotProvider();
         placeAtBottomRight();
         render();
-        ShowWindow(window, SW_SHOWNOACTIVATE);
+        if (showInitially) {
+            ShowWindow(window, SW_SHOWNOACTIVATE);
+        }
         syncRefreshTimer();
     }
 
@@ -625,6 +634,19 @@ struct ChronoxWidget::Impl {
         append(MF_STRING | (alwaysOnTop ? MF_CHECKED : 0),
                MenuAlwaysOnTop, L"Toujours au premier plan");
         append(MF_SEPARATOR, 0, nullptr);
+        const StartupState startupState = startupStateProvider();
+        const wchar_t* startupText = L"Lancer Chronox avec Windows";
+        if (startupState == StartupState::DisabledByWindows) {
+            startupText =
+                L"Lancer Chronox avec Windows (d\u00e9sactiv\u00e9 par Windows)";
+        } else if (startupState == StartupState::Unknown) {
+            startupText =
+                L"Lancer Chronox avec Windows (\u00e9tat Windows inconnu)";
+        }
+        append(MF_STRING |
+                   (startupState == StartupState::Enabled ? MF_CHECKED : 0),
+               MenuStartup, startupText);
+        append(MF_SEPARATOR, 0, nullptr);
         append(MF_STRING, MenuExit, L"Quitter Chronox");
         POINT position{};
         if (!GetCursorPos(&position)) {
@@ -771,6 +793,9 @@ struct ChronoxWidget::Impl {
             case MenuAlwaysOnTop:
                 toggleAlwaysOnTop();
                 return 0;
+            case MenuStartup:
+                startupToggleHandler();
+                return 0;
             case MenuExit:
                 exitHandler();
                 return 0;
@@ -800,15 +825,19 @@ struct ChronoxWidget::Impl {
 
 ChronoxWidget::ChronoxWidget(SnapshotProvider snapshotProvider,
                              ExitHandler exitHandler,
-                             ErrorHandler errorHandler)
+                             ErrorHandler errorHandler,
+                             StartupStateProvider startupStateProvider,
+                             StartupToggleHandler startupToggleHandler)
     : impl_(std::make_unique<Impl>(std::move(snapshotProvider),
                                    std::move(exitHandler),
-                                   std::move(errorHandler))) {}
+                                   std::move(errorHandler),
+                                   std::move(startupStateProvider),
+                                   std::move(startupToggleHandler))) {}
 
 ChronoxWidget::~ChronoxWidget() = default;
 
-void ChronoxWidget::create() {
-    impl_->create();
+void ChronoxWidget::create(bool showInitially) {
+    impl_->create(showInitially);
 }
 
 void ChronoxWidget::refresh() {
