@@ -2,7 +2,10 @@
 
 #include <sqlite3.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -11,6 +14,7 @@ namespace chronox {
 namespace {
 
 constexpr int CurrentSchemaVersion = 1;
+std::atomic<std::uint64_t> backupSequence{};
 
 std::runtime_error databaseError(sqlite3* database, const char* operation) {
     return std::runtime_error(std::string(operation) + ": " +
@@ -69,6 +73,15 @@ public:
         return sqlite3_column_int64(statement_, column);
     }
 
+    std::string text(int column) const {
+        const auto* value = sqlite3_column_text(statement_, column);
+        const int length = sqlite3_column_bytes(statement_, column);
+        return value == nullptr
+                   ? std::string{}
+                   : std::string(reinterpret_cast<const char*>(value),
+                                 static_cast<std::size_t>(length));
+    }
+
 private:
     sqlite3* database_;
     sqlite3_stmt* statement_{};
@@ -100,6 +113,7 @@ private:
 
 struct SessionDatabase::Impl {
     explicit Impl(const std::filesystem::path& path) {
+        databasePath = path;
 #if defined(_WIN32)
         const int result = sqlite3_open16(path.c_str(), &database);
 #else
@@ -121,6 +135,7 @@ struct SessionDatabase::Impl {
             check(database, sqlite3_busy_timeout(database, 5000),
                   "sqlite3_busy_timeout");
             execute(database, "PRAGMA foreign_keys = ON");
+            verifyIntegrity();
             execute(database, "PRAGMA journal_mode = DELETE");
             execute(database, "PRAGMA synchronous = FULL");
             migrate();
@@ -180,6 +195,23 @@ struct SessionDatabase::Impl {
         transaction.commit();
     }
 
+    void verifyIntegrity() {
+        Statement integrity(database, "PRAGMA quick_check");
+        bool foundResult = false;
+        while (integrity.step() == SQLITE_ROW) {
+            foundResult = true;
+            const std::string result = integrity.text(0);
+            if (result != "ok") {
+                throw std::runtime_error(
+                    "Chronox database integrity check failed: " + result);
+            }
+        }
+        if (!foundResult) {
+            throw std::runtime_error(
+                "Chronox database integrity check returned no result");
+        }
+    }
+
     void recoverInterruptedInterval() {
         Transaction transaction(database);
         execute(database,
@@ -192,7 +224,128 @@ struct SessionDatabase::Impl {
         transaction.commit();
     }
 
+    void backupTo(const std::filesystem::path& destination) const {
+        std::error_code error;
+        const auto absoluteSource = std::filesystem::absolute(databasePath, error);
+        if (error) {
+            throw std::filesystem::filesystem_error(
+                "Could not resolve the Chronox database path", databasePath, error);
+        }
+        const auto absoluteDestination =
+            std::filesystem::absolute(destination, error);
+        if (error) {
+            throw std::filesystem::filesystem_error(
+                "Could not resolve the Chronox backup path", destination, error);
+        }
+        if (absoluteSource.lexically_normal() ==
+            absoluteDestination.lexically_normal()) {
+            throw std::invalid_argument(
+                "Chronox backup destination must differ from the open database");
+        }
+        const bool destinationExists = std::filesystem::exists(destination, error);
+        if (error) {
+            throw std::filesystem::filesystem_error(
+                "Could not inspect the Chronox backup destination", destination,
+                error);
+        }
+        if (destinationExists) {
+            throw std::runtime_error(
+                "Chronox backup destination already exists");
+        }
+
+        auto temporaryPath = destination;
+        temporaryPath +=
+            ".tmp-" +
+            std::to_string(std::chrono::steady_clock::now()
+                               .time_since_epoch()
+                               .count()) +
+            "-" + std::to_string(backupSequence.fetch_add(1));
+
+        const auto encodedPath = temporaryPath.u8string();
+        const auto* utf8Path =
+            reinterpret_cast<const char*>(encodedPath.c_str());
+        sqlite3* backupDatabase = nullptr;
+        const int openResult =
+            sqlite3_open_v2(utf8Path, &backupDatabase,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+                                SQLITE_OPEN_EXCLUSIVE | SQLITE_OPEN_FULLMUTEX,
+                            nullptr);
+        if (openResult != SQLITE_OK) {
+            const std::string message =
+                backupDatabase == nullptr
+                    ? sqlite3_errstr(openResult)
+                    : sqlite3_errmsg(backupDatabase);
+            sqlite3_close(backupDatabase);
+            std::error_code cleanupError;
+            std::filesystem::remove(temporaryPath, cleanupError);
+            throw std::runtime_error("Creating Chronox backup failed: " + message);
+        }
+
+        sqlite3_backup* backup =
+            sqlite3_backup_init(backupDatabase, "main", database, "main");
+        if (backup == nullptr) {
+            const std::string message = sqlite3_errmsg(backupDatabase);
+            sqlite3_close(backupDatabase);
+            std::error_code cleanupError;
+            std::filesystem::remove(temporaryPath, cleanupError);
+            throw std::runtime_error(
+                "Starting Chronox backup failed: " + message +
+                (cleanupError ? "; temporary file cleanup failed: " +
+                                    cleanupError.message()
+                              : std::string{}));
+        }
+
+        int stepResult = SQLITE_OK;
+        do {
+            stepResult = sqlite3_backup_step(backup, -1);
+            if (stepResult == SQLITE_BUSY || stepResult == SQLITE_LOCKED) {
+                sqlite3_sleep(10);
+            }
+        } while (stepResult == SQLITE_BUSY || stepResult == SQLITE_LOCKED);
+        const int finishResult = sqlite3_backup_finish(backup);
+        const std::string stepError =
+            stepResult == SQLITE_DONE ? std::string{}
+                                      : sqlite3_errmsg(backupDatabase);
+        const std::string finishError =
+            finishResult == SQLITE_OK ? std::string{}
+                                      : sqlite3_errmsg(backupDatabase);
+        const int closeResult = sqlite3_close(backupDatabase);
+        const std::string closeError =
+            closeResult == SQLITE_OK ? std::string{} : sqlite3_errstr(closeResult);
+
+        if (stepResult != SQLITE_DONE || finishResult != SQLITE_OK ||
+            closeResult != SQLITE_OK) {
+            if (closeResult != SQLITE_OK) {
+                sqlite3_close_v2(backupDatabase);
+            }
+            std::error_code cleanupError;
+            std::filesystem::remove(temporaryPath, cleanupError);
+            std::string message = stepError.empty()
+                                      ? (finishError.empty() ? closeError
+                                                             : finishError)
+                                      : stepError;
+            if (cleanupError) {
+                message += "; temporary file cleanup failed: " +
+                           cleanupError.message();
+            }
+            throw std::runtime_error(
+                "Completing Chronox backup failed: " + message);
+        }
+
+        std::filesystem::rename(temporaryPath, destination, error);
+        if (error) {
+            std::error_code cleanupError;
+            std::filesystem::remove(temporaryPath, cleanupError);
+            throw std::runtime_error(
+                "Publishing Chronox backup failed: " + error.message() +
+                (cleanupError ? "; temporary file cleanup failed: " +
+                                    cleanupError.message()
+                              : std::string{}));
+        }
+    }
+
     sqlite3* database{};
+    std::filesystem::path databasePath;
     std::optional<std::int64_t> activeInterval;
 };
 
@@ -250,6 +403,11 @@ void SessionDatabase::checkpoint(Timestamp timestamp) {
     update.bind(timestamp, 1);
     update.bind(*impl_->activeInterval, 2);
     update.step();
+}
+
+void SessionDatabase::backupTo(
+    const std::filesystem::path& destination) const {
+    impl_->backupTo(destination);
 }
 
 Timestamp SessionDatabase::latestRecordedTimestamp() const {

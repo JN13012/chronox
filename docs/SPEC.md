@@ -38,6 +38,15 @@ Windows, serveur, service cloud et mesure antérieure au démarrage du programme
 - Les intervalles fermés sont enregistrés dans
   `%LOCALAPPDATA%\Chronox\chronox.db`, en UTC, dans des transactions SQLite.
   Une contrainte d’unicité n’autorise qu’un seul intervalle ouvert.
+- À l’ouverture, `PRAGMA quick_check` vérifie la cohérence de la base avant
+  migration ou récupération. Une erreur est signalée sans réparation ni
+  remplacement automatique du fichier ; la récupération documentée ci-dessous
+  concerne uniquement les intervalles interrompus dans une base intègre.
+- `SessionDatabase::backupTo` produit un snapshot cohérent avec l’API de
+  sauvegarde en ligne SQLite. La destination doit être nouvelle ; le snapshot
+  est construit à côté de celle-ci puis publié uniquement après la réussite de
+  la copie. La fonctionnalité ne planifie pas les sauvegardes et ne remplace
+  pas automatiquement une sauvegarde existante.
 - Le schéma SQLite utilise `PRAGMA user_version` et des migrations
   transactionnelles. Une version de Chronox ne modifie pas une base dont le
   schéma est plus récent.
@@ -91,8 +100,9 @@ CMake télécharge l’amalgame SQLite 3.54.1 depuis la source officielle avec u
 empreinte SHA-256 épinglée. Aucun serveur ni bibliothèque SQLite installée sur
 la machine n’est requis. Les tests automatisés couvrent la durabilité après
 réouverture, les transitions idempotentes, la récupération après interruption,
-les sessions traversant minuit, les quatre rapports calendaires et le passage
-à l’heure d’été et à l’heure d’hiver.
+le rejet sans réécriture d’une base corrompue, la sauvegarde en ligne, les
+sessions traversant minuit, les quatre rapports calendaires et le passage à
+l’heure d’été et à l’heure d’hiver.
 Sous Windows, le test DST utilise un convertisseur de fuseau déterministe
 pour ne pas dépendre de la conversion d’offset de `_tzset` dans le CRT du
 runner ; les autres plateformes exercent les règles POSIX du runtime.

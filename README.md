@@ -56,8 +56,11 @@ Une période encore en cours est sauvegardée au moins une fois par minute. Si
 Chronox s’arrête brutalement, la récupération clôt cette période à son dernier
 point de sauvegarde : aucun temps postérieur à l’arrêt n’est ajouté, au prix
 d’une perte correspondant au temps écoulé depuis le dernier point de sauvegarde.
-Une seule instance peut suivre la session Windows à la fois. Les changements
-d’heure sont pris en compte dans les limites calendaires locales.
+À l’ouverture, SQLite vérifie l’intégrité ; une base corrompue est signalée et
+n’est pas réparée ni remplacée automatiquement. L’API de stockage fournit une
+sauvegarde cohérente par SQLite vers un nouveau fichier, sans planification
+automatique. Une seule instance peut suivre la session Windows à la fois. Les
+changements d’heure sont pris en compte dans les limites calendaires locales.
 
 Voir [docs/SPEC.md](docs/SPEC.md) pour le périmètre, les règles de mesure et les
 vérifications manuelles. Voir [docs/PERFORMANCE.md](docs/PERFORMANCE.md) pour

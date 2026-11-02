@@ -20,6 +20,7 @@ public:
 
     void setCounting(bool counting, Timestamp timestamp);
     void checkpoint(Timestamp timestamp);
+    void backupTo(const std::filesystem::path& destination) const;
     Timestamp latestRecordedTimestamp() const;
     std::chrono::microseconds duration(CalendarPeriod period, Timestamp now) const;
     std::chrono::microseconds duration(CalendarPeriod period,

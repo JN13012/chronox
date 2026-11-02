@@ -8,8 +8,10 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -222,6 +224,82 @@ void interruptedIntervalsStopAtTheirLastCheckpoint() {
                                    start + toTimestampTicks(5h)) == 1h + 45s,
                 "time between a crash and restart is never counted");
     }
+}
+
+void onlineBackupsAreCompleteAndDoNotModifyTheSource() {
+    TemporaryDatabase file;
+    const auto snapshotPath = file.path().parent_path() / "snapshot.db";
+    const auto today =
+        chronox::calendarPeriodContaining(toMicroseconds(std::time(nullptr)),
+                                          CalendarPeriod::Day);
+    const Timestamp start = today.start + toTimestampTicks(60s);
+    {
+        SessionDatabase database(file.path());
+        database.setCounting(true, start);
+        database.checkpoint(start + toTimestampTicks(45s));
+        database.backupTo(snapshotPath);
+        require(std::filesystem::is_regular_file(snapshotPath),
+                "online backup is published as a complete file");
+
+        bool existingDestinationRejected = false;
+        try {
+            database.backupTo(snapshotPath);
+        } catch (const std::runtime_error&) {
+            existingDestinationRejected = true;
+        }
+        require(existingDestinationRejected,
+                "online backup never overwrites an existing destination");
+
+        bool sourceDestinationRejected = false;
+        try {
+            database.backupTo(file.path());
+        } catch (const std::invalid_argument&) {
+            sourceDestinationRejected = true;
+        }
+        require(sourceDestinationRejected,
+                "online backup never targets the open database");
+
+        SessionDatabase snapshot(snapshotPath);
+        require(snapshot.duration(CalendarPeriod::Day,
+                                  start + toTimestampTicks(3h)) == 45s,
+                "online backup contains a consistent checkpoint snapshot");
+        database.setCounting(false, start + toTimestampTicks(60s));
+    }
+
+    SessionDatabase original(file.path());
+    require(original.duration(CalendarPeriod::Day,
+                              start + toTimestampTicks(2min)) == 60s,
+            "creating a backup leaves the source database writable");
+    SessionDatabase snapshot(snapshotPath);
+    require(snapshot.duration(CalendarPeriod::Day,
+                              start + toTimestampTicks(3h)) == 45s,
+            "later source writes do not alter the published snapshot");
+}
+
+void corruptDatabasesAreRejectedWithoutBeingRewritten() {
+    TemporaryDatabase file;
+    constexpr std::string_view contents = "not a Chronox SQLite database";
+    {
+        std::ofstream output(file.path(), std::ios::binary);
+        require(output.good(), "corrupt database fixture can be created");
+        output.write(contents.data(),
+                     static_cast<std::streamsize>(contents.size()));
+        require(output.good(), "corrupt database fixture can be written");
+    }
+
+    bool rejected = false;
+    try {
+        SessionDatabase database(file.path());
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    require(rejected, "corrupt database is rejected with an explicit error");
+
+    std::ifstream input(file.path(), std::ios::binary);
+    const std::string after((std::istreambuf_iterator<char>(input)),
+                            std::istreambuf_iterator<char>());
+    require(after == contents,
+            "integrity validation does not rewrite a corrupt database");
 }
 
 void sessionsCrossingMidnightBelongToBothCalendarDays() {
@@ -500,6 +578,8 @@ void daylightSavingUsesLocalCalendarBoundaries() {
 int main() {
     transitionsAreDurableAndIdempotent();
     interruptedIntervalsStopAtTheirLastCheckpoint();
+    onlineBackupsAreCompleteAndDoNotModifyTheSource();
+    corruptDatabasesAreRejectedWithoutBeingRewritten();
     sessionsCrossingMidnightBelongToBothCalendarDays();
     recentStatisticsIgnoreLargeHistoricalIntervals();
     newerDatabaseSchemasAreNotOverwritten();
