@@ -47,10 +47,12 @@ La base est créée automatiquement dans
 `%LOCALAPPDATA%\Chronox\chronox.db`. Elle conserve les périodes de mesure après
 la fermeture de Chronox et le redémarrage de Windows. Le widget affiche le
 cumul du jour selon le fuseau horaire local et l’état de session. Le moteur
-conserve également les rapports semaine (lundi à dimanche), mois et année ; le
-dashboard qui les présentera n’est pas inclus dans P1. L’affichage se met à
-jour lors des transitions et chaque seconde uniquement lorsque le widget est
-déployé et que le suivi compte.
+expose `SessionDatabase::queryHistory` pour consulter en lecture seule les
+cumuls et segments réellement comptés d’une période, y compris une date
+antérieure. Le temps déclaré est distinct et indisponible en l’absence de
+données déclaratives. Le dashboard qui présentera ces informations n’est pas
+inclus dans P1. L’affichage se met à jour lors des transitions et chaque
+seconde uniquement lorsque le widget est déployé et que le suivi compte.
 
 Une période encore en cours est sauvegardée au moins une fois par minute. Si
 Chronox s’arrête brutalement, la récupération clôt cette période à son dernier

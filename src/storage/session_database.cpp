@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -431,6 +432,50 @@ std::chrono::microseconds SessionDatabase::duration(
     const CalendarTimeConverter& converter) const {
     const TimeRange range = calendarPeriodContaining(now, period, converter);
     return duration(range, now);
+}
+
+HistoryReport SessionDatabase::queryHistory(CalendarPeriod period,
+                                            Timestamp dateAnchor,
+                                            Timestamp now) const {
+    return queryHistory(calendarPeriodContaining(dateAnchor, period), period, now);
+}
+
+HistoryReport SessionDatabase::queryHistory(
+    CalendarPeriod period,
+    Timestamp dateAnchor,
+    Timestamp now,
+    const CalendarTimeConverter& converter) const {
+    return queryHistory(
+        calendarPeriodContaining(dateAnchor, period, converter), period, now);
+}
+
+HistoryReport SessionDatabase::queryHistory(TimeRange range,
+                                            CalendarPeriod period,
+                                            Timestamp now) const {
+    const Timestamp effectiveEnd = std::min(range.end, now);
+    Statement query(
+        impl_->database,
+        "SELECT max(started_at_us, ?1), "
+        "min(COALESCE(ended_at_us, ?2), ?3) "
+        "FROM session_intervals "
+        "WHERE started_at_us < ?3 "
+        "AND (ended_at_us IS NULL OR ended_at_us > ?1) "
+        "ORDER BY started_at_us, id");
+    query.bind(range.start, 1);
+    query.bind(now, 2);
+    query.bind(effectiveEnd, 3);
+
+    HistoryReport report{period, range};
+    while (query.step() == SQLITE_ROW) {
+        const Timestamp start = query.integer(0);
+        const Timestamp end = query.integer(1);
+        if (end <= start) {
+            continue;
+        }
+        report.sessionIntervals.push_back({start, end});
+        report.sessionDuration += std::chrono::microseconds(end - start);
+    }
+    return report;
 }
 
 std::chrono::microseconds SessionDatabase::duration(TimeRange range,

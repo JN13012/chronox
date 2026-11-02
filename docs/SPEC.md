@@ -60,6 +60,13 @@ Windows, serveur, service cloud et mesure antérieure au démarrage du programme
 - Les rapports jour, semaine (lundi à dimanche), mois et année calculent
   l’intersection des intervalles UTC avec les limites calendaires du fuseau
   local. Les journées de changement d’heure peuvent durer 23 ou 25 heures.
+- `SessionDatabase::queryHistory` fournit une consultation en lecture seule
+  par période et horodatage d’ancrage, y compris pour une date antérieure. Le
+  rapport retourne les bornes calendaires locales, le cumul et uniquement les
+  segments UTC effectivement comptabilisés, découpés aux limites consultées.
+  Les intervalles ne portent pas de cause d’interruption. Le temps de session
+  mesuré et le temps de travail déclaré sont des champs distincts ; ce dernier
+  reste indisponible tant qu’aucune source de déclaration n’existe.
 - Les événements redondants ne changent pas l’état ni le cumul. Les événements
   de verrouillage/déverrouillage reçus pendant la veille mettent à jour l’état
   de session sans faire tourner le compteur.

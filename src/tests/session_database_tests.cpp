@@ -320,6 +320,53 @@ void sessionsCrossingMidnightBelongToBothCalendarDays() {
     }
 }
 
+void historicalQueriesReturnOnlyCountedIntervals() {
+    TemporaryDatabase file;
+    const auto today =
+        chronox::calendarPeriodContaining(toMicroseconds(std::time(nullptr)),
+                                          CalendarPeriod::Day);
+    const auto yesterday =
+        chronox::calendarPeriodContaining(today.start - 1, CalendarPeriod::Day);
+    const Timestamp now = today.start + toTimestampTicks(2h);
+    SessionDatabase database(file.path());
+
+    database.setCounting(true, yesterday.start + toTimestampTicks(5min));
+    database.setCounting(false, yesterday.start + toTimestampTicks(10min));
+    database.setCounting(true, today.start - toTimestampTicks(15min));
+    database.setCounting(false, today.start + toTimestampTicks(30min));
+    database.setCounting(true, today.start + toTimestampTicks(1h));
+    database.checkpoint(today.start + toTimestampTicks(1h + 45min));
+
+    const auto todayReport = database.queryHistory(
+        CalendarPeriod::Day, today.start + toTimestampTicks(12h), now);
+    require(todayReport.range.start == today.start &&
+                todayReport.range.end == today.end,
+            "history exposes local calendar bounds for the selected date");
+    require(todayReport.sessionIntervals.size() == 2,
+            "history returns only the counted intervals overlapping the date");
+    require(todayReport.sessionIntervals[0].start == today.start &&
+                todayReport.sessionIntervals[0].end ==
+                    today.start + toTimestampTicks(30min),
+            "a cross-midnight session is clipped to the selected date");
+    require(todayReport.sessionIntervals[1].start ==
+                    today.start + toTimestampTicks(1h) &&
+                todayReport.sessionIntervals[1].end == now,
+            "an active counted interval is bounded by the query time");
+    require(todayReport.sessionDuration == 90min,
+            "history duration equals the sum of its counted intervals");
+    require(!todayReport.declaredWorkDuration.has_value(),
+            "undeclared work is represented as unavailable, not zero");
+
+    const auto yesterdayReport = database.queryHistory(
+        CalendarPeriod::Day, today.start - 1, now);
+    require(yesterdayReport.range.start == yesterday.start &&
+                yesterdayReport.range.end == today.start,
+            "the query can navigate to the preceding local date");
+    require(yesterdayReport.sessionIntervals.size() == 2 &&
+                yesterdayReport.sessionDuration == 20min,
+            "the previous date contains only its counted session segments");
+}
+
 void recentStatisticsIgnoreLargeHistoricalIntervals() {
     TemporaryDatabase file;
     const auto today =
@@ -423,6 +470,14 @@ void allCalendarPeriodsAggregateTheirFullRange() {
         require(database.duration(period, reference) ==
                     std::chrono::microseconds(range.end - range.start),
                 "day, week, month and year reports cover their full local period");
+        const auto report =
+            database.queryHistory(period, reference, range.end);
+        require(report.range.start == range.start &&
+                    report.range.end == range.end &&
+                    report.sessionDuration ==
+                        std::chrono::microseconds(range.end - range.start) &&
+                    report.sessionIntervals.size() == 1,
+                "historical queries aggregate all four calendar periods");
     }
 }
 
@@ -581,6 +636,7 @@ int main() {
     onlineBackupsAreCompleteAndDoNotModifyTheSource();
     corruptDatabasesAreRejectedWithoutBeingRewritten();
     sessionsCrossingMidnightBelongToBothCalendarDays();
+    historicalQueriesReturnOnlyCountedIntervals();
     recentStatisticsIgnoreLargeHistoricalIntervals();
     newerDatabaseSchemasAreNotOverwritten();
     allCalendarPeriodsAggregateTheirFullRange();
