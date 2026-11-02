@@ -1,4 +1,5 @@
 #include "chronox_widget.h"
+#include "window_coordinator.h"
 #include "windows_session_monitor.h"
 #include "windows_startup.h"
 
@@ -157,6 +158,7 @@ int runChronox(bool startHidden,
         }
         PostQuitMessage(1);
     };
+    chronox::WindowCoordinator windowCoordinator(captureError);
 
     const auto stop = [&] {
         try {
@@ -221,6 +223,7 @@ int runChronox(bool startHidden,
                     tracker->isCounting()};
             },
             stop,
+            [&] { windowCoordinator.openDashboard(); },
             captureError,
             [&] { return startup.state(); },
             [&] {

@@ -115,6 +115,13 @@ Implémenté dans le prototype Windows :
 - option « Lancer Chronox avec Windows » dans le menu de la zone de notification,
   désactivée par défaut ; le démarrage enregistré ouvre l’application dans la
   zone de notification sans afficher le widget.
+- fenêtre dashboard native indépendante, redimensionnable, avec barre de titre
+  Windows, icône officielle Chronox, fond graphite et navigation vers Vue
+  générale, Historique et Paramètres ; la Vue générale est sélectionnée par
+  défaut. Le contenu de ces pages reste en cours d’implémentation.
+- ouverture du dashboard par clic sur le compteur, double-clic sur l’icône de
+  notification ou commande du menu de notification. Sa fermeture masque la
+  fenêtre sans arrêter Chronox.
 
 Le rafraîchissement à la seconde est limité au widget visible et déployé tant
 que le moteur compte. Le code n’ajoute pas de thread applicatif ni de boucle
@@ -123,16 +130,18 @@ monitoring existante, et la sauvegarde SQLite reste à son rythme d’une minute
 Les bibliothèques Windows peuvent créer des threads internes, comme le montre
 le comptage du processus dans le [bilan de performance](./PERFORMANCE.md).
 
-Non inclus dans P1 : dashboard, navigation entre vues, arcs horaires, plage
-configurable, persistance des préférences et suivi applicatif. La languette et
-les ressources sont un prototype ; le positionnement multi-écrans, les DPI
-mixtes, l’accessibilité et l’affichage en plein écran restent à valider.
+Non inclus dans P1.3.1 : données et graphiques des pages du dashboard,
+historique navigable, arcs horaires, plage configurable, persistance des
+préférences et suivi applicatif. Le shell du dashboard est présent, mais ses
+pages de contenu restent à livrer. La languette et les ressources sont un
+prototype ; les résolutions et DPI multiples, l’accessibilité et l’affichage en
+plein écran restent à valider.
 
 Le moteur expose également une API de lecture historique par période et date
-d’ancrage, sans dashboard : les intervalles sont les segments réellement
-comptabilisés, sans interprétation des interruptions. Le temps de session mesuré
-est distinct du temps de travail déclaré, qui reste indisponible faute de
-données déclaratives.
+d’ancrage, qui sera présentée dans les prochaines étapes du dashboard : les
+intervalles sont les segments réellement comptabilisés, sans interprétation des
+interruptions. Le temps de session mesuré est distinct du temps de travail
+déclaré, qui reste indisponible faute de données déclaratives.
 
 Les mesures de consommation et les résultats de compilation Windows sont
 consignés dans le [protocole de performance](./PERFORMANCE.md) après leur

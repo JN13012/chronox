@@ -43,8 +43,10 @@ if(WIN32)
     add_executable(chronox WIN32
         windows/chronox.rc
         windows/chronox_widget.cpp
+        windows/dashboard_window.cpp
         windows/main.cpp
         windows/widget_presentation.cpp
+        windows/window_coordinator.cpp
         windows/windows_session_monitor.cpp
         windows/windows_startup.cpp
     )
@@ -116,6 +118,34 @@ if(BUILD_TESTING)
     add_test(NAME chronox_widget_tests COMMAND chronox_widget_tests)
 
     if(WIN32)
+        add_executable(chronox_dashboard_smoke WIN32 EXCLUDE_FROM_ALL
+            windows/chronox.rc
+            tests/dashboard_window_smoke.cpp
+            windows/dashboard_window.cpp
+            windows/window_coordinator.cpp
+        )
+        target_include_directories(chronox_dashboard_smoke PRIVATE
+            "${PROJECT_SOURCE_DIR}"
+        )
+        target_link_libraries(chronox_dashboard_smoke PRIVATE
+            User32
+            D2d1
+            Dwrite
+        )
+        target_compile_features(chronox_dashboard_smoke PRIVATE cxx_std_20)
+        target_compile_definitions(chronox_dashboard_smoke PRIVATE
+            UNICODE
+            _UNICODE
+            NOMINMAX
+            WINVER=0x0A00
+            _WIN32_WINNT=0x0A00
+        )
+        if(MSVC)
+            target_compile_options(chronox_dashboard_smoke PRIVATE
+                /W4 /permissive-
+            )
+        endif()
+
         add_executable(chronox_windows_session_monitor_tests
             tests/windows_session_monitor_tests.cpp
             windows/windows_session_monitor.cpp

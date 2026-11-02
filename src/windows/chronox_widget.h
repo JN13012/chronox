@@ -19,12 +19,14 @@ class ChronoxWidget {
 public:
     using SnapshotProvider = std::function<WidgetSnapshot()>;
     using ExitHandler = std::function<void()>;
+    using DashboardOpenHandler = std::function<void()>;
     using ErrorHandler = std::function<void(std::exception_ptr)>;
     using StartupStateProvider = std::function<StartupState()>;
     using StartupToggleHandler = std::function<void()>;
 
     ChronoxWidget(SnapshotProvider snapshotProvider,
                   ExitHandler exitHandler,
+                  DashboardOpenHandler dashboardOpenHandler,
                   ErrorHandler errorHandler,
                   StartupStateProvider startupStateProvider,
                   StartupToggleHandler startupToggleHandler);

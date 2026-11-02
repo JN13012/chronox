@@ -5,6 +5,7 @@
 
 #include <windows.h>
 #include <windowsx.h>
+#include <windowsx.h>
 #include <shellapi.h>
 #include <wincodec.h>
 #include <d2d1.h>
@@ -29,11 +30,14 @@ using Microsoft::WRL::ComPtr;
 constexpr wchar_t WidgetClassName[] = L"ChronoxV04WidgetWindow";
 constexpr UINT TrayCallbackMessage = WM_APP + 1;
 constexpr UINT_PTR RefreshTimerId = 2;
+constexpr UINT_PTR WidgetClickTimerId = 3;
+constexpr UINT_PTR TrayClickTimerId = 4;
 constexpr UINT TrayIconId = 1;
 constexpr UINT MenuToggleWidget = 1001;
 constexpr UINT MenuAlwaysOnTop = 1002;
 constexpr UINT MenuExit = 1003;
 constexpr UINT MenuStartup = 1004;
+constexpr UINT MenuOpenDashboard = 1005;
 constexpr float CanvasSize = 250.0f;
 constexpr float CollapsedWidth = 34.0f;
 constexpr float CollapsedHeight = 76.0f;
@@ -70,11 +74,13 @@ std::wstring makeTooltip() {
 struct ChronoxWidget::Impl {
     Impl(SnapshotProvider snapshotProviderValue,
          ExitHandler exitHandlerValue,
+         DashboardOpenHandler dashboardOpenHandlerValue,
          ErrorHandler errorHandlerValue,
          StartupStateProvider startupStateProviderValue,
          StartupToggleHandler startupToggleHandlerValue)
         : snapshotProvider(std::move(snapshotProviderValue)),
           exitHandler(std::move(exitHandlerValue)),
+          dashboardOpenHandler(std::move(dashboardOpenHandlerValue)),
           errorHandler(std::move(errorHandlerValue)),
           startupStateProvider(std::move(startupStateProviderValue)),
           startupToggleHandler(std::move(startupToggleHandlerValue)) {}
@@ -93,6 +99,7 @@ struct ChronoxWidget::Impl {
 
     SnapshotProvider snapshotProvider;
     ExitHandler exitHandler;
+    DashboardOpenHandler dashboardOpenHandler;
     ErrorHandler errorHandler;
     StartupStateProvider startupStateProvider;
     StartupToggleHandler startupToggleHandler;
@@ -102,6 +109,10 @@ struct ChronoxWidget::Impl {
     bool alwaysOnTop{};
     bool trayIconAdded{};
     bool refreshTimerSet{};
+    bool widgetClickPending{};
+    bool trayClickPending{};
+    bool counterPressPending{};
+    bool ignoreCounterRelease{};
     UINT dpi{96};
     WidgetSnapshot snapshot{};
     std::filesystem::path shellPath;
@@ -154,7 +165,7 @@ struct ChronoxWidget::Impl {
 
         WNDCLASSEXW windowClass{};
         windowClass.cbSize = sizeof(windowClass);
-        windowClass.style = CS_HREDRAW | CS_VREDRAW;
+        windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
         windowClass.lpfnWndProc = &Impl::windowProcedure;
         windowClass.hInstance = GetModuleHandleW(nullptr);
         windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
@@ -617,6 +628,7 @@ struct ChronoxWidget::Impl {
     }
 
     void showContextMenu() {
+        cancelPendingTrayClick();
         HMENU menu = CreatePopupMenu();
         if (menu == nullptr) {
             throw windowsError("CreatePopupMenu(widget)", GetLastError());
@@ -631,6 +643,7 @@ struct ChronoxWidget::Impl {
         const auto toggleText = IsWindowVisible(window) ? L"Masquer Chronox"
                                                         : L"Afficher Chronox";
         append(MF_STRING, MenuToggleWidget, toggleText);
+        append(MF_STRING, MenuOpenDashboard, L"Ouvrir le tableau de bord");
         append(MF_STRING | (alwaysOnTop ? MF_CHECKED : 0),
                MenuAlwaysOnTop, L"Toujours au premier plan");
         append(MF_SEPARATOR, 0, nullptr);
@@ -672,18 +685,70 @@ struct ChronoxWidget::Impl {
     void handleTrayCallback(LPARAM lParam) {
         switch (LOWORD(lParam)) {
         case NIN_SELECT:
-        case NIN_KEYSELECT:
         case WM_LBUTTONUP:
+            queueTrayClick();
+            break;
         case WM_LBUTTONDBLCLK:
+            cancelPendingTrayClick();
+            dashboardOpenHandler();
+            break;
+        case NIN_KEYSELECT:
+            cancelPendingTrayClick();
             toggleVisibility();
             break;
         case WM_RBUTTONUP:
         case WM_CONTEXTMENU:
+            cancelPendingWidgetClick();
+            cancelPendingTrayClick();
             showContextMenu();
             break;
         default:
             break;
         }
+    }
+
+    void queueTrayClick() {
+        if (SetTimer(window, TrayClickTimerId, GetDoubleClickTime(), nullptr) ==
+            0) {
+            throw windowsError("SetTimer(tray click)", GetLastError());
+        }
+        trayClickPending = true;
+    }
+
+    void cancelPendingTrayClick() {
+        if (!trayClickPending) {
+            return;
+        }
+        if (!KillTimer(window, TrayClickTimerId)) {
+            throw windowsError("KillTimer(tray click)", GetLastError());
+        }
+        trayClickPending = false;
+    }
+
+    void queueWidgetClick() {
+        if (SetTimer(window, WidgetClickTimerId, GetDoubleClickTime(), nullptr) ==
+            0) {
+            throw windowsError("SetTimer(widget click)", GetLastError());
+        }
+        widgetClickPending = true;
+    }
+
+    void cancelPendingWidgetClick() {
+        if (!widgetClickPending) {
+            return;
+        }
+        if (!KillTimer(window, WidgetClickTimerId)) {
+            throw windowsError("KillTimer(widget click)", GetLastError());
+        }
+        widgetClickPending = false;
+    }
+
+    bool isCounterHit(int x, int y) const {
+        return expanded &&
+               x >= MulDiv(48, static_cast<int>(dpi), 96) &&
+               x < MulDiv(202, static_cast<int>(dpi), 96) &&
+               y >= MulDiv(91, static_cast<int>(dpi), 96) &&
+               y < MulDiv(178, static_cast<int>(dpi), 96);
     }
 
     void handleMessageError() noexcept {
@@ -736,20 +801,51 @@ struct ChronoxWidget::Impl {
         case WM_TIMER:
             if (wParam == RefreshTimerId) {
                 refresh();
+            } else if (wParam == TrayClickTimerId && trayClickPending) {
+                if (!KillTimer(hwnd, TrayClickTimerId)) {
+                    throw windowsError("KillTimer(tray click)", GetLastError());
+                }
+                trayClickPending = false;
+                toggleVisibility();
+            } else if (wParam == WidgetClickTimerId && widgetClickPending) {
+                if (!KillTimer(hwnd, WidgetClickTimerId)) {
+                    throw windowsError("KillTimer(widget click)", GetLastError());
+                }
+                widgetClickPending = false;
+                dashboardOpenHandler();
             }
             return 0;
         case WM_LBUTTONUP: {
+            if (ignoreCounterRelease) {
+                ignoreCounterRelease = false;
+                counterPressPending = false;
+                return 0;
+            }
             const int x = GET_X_LPARAM(lParam);
             const int y = GET_Y_LPARAM(lParam);
             const bool clickedTab =
                 x >= MulDiv(219, static_cast<int>(dpi), 96) &&
                 y >= MulDiv(108, static_cast<int>(dpi), 96) &&
                 y <= MulDiv(143, static_cast<int>(dpi), 96);
-            if (!expanded || clickedTab) {
+            if (counterPressPending) {
+                counterPressPending = false;
+                if (isCounterHit(x, y)) {
+                    queueWidgetClick();
+                }
+            } else if (!expanded || clickedTab) {
                 setExpanded(!expanded);
             }
             return 0;
         }
+        case WM_LBUTTONDBLCLK:
+            if (isCounterHit(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                counterPressPending = false;
+                ignoreCounterRelease = true;
+                cancelPendingWidgetClick();
+                dashboardOpenHandler();
+                return 0;
+            }
+            return 0;
         case WM_LBUTTONDOWN: {
             const int x = GET_X_LPARAM(lParam);
             const int y = GET_Y_LPARAM(lParam);
@@ -757,6 +853,10 @@ struct ChronoxWidget::Impl {
                 x >= MulDiv(219, static_cast<int>(dpi), 96) &&
                 y >= MulDiv(108, static_cast<int>(dpi), 96) &&
                 y <= MulDiv(143, static_cast<int>(dpi), 96);
+            if (isCounterHit(x, y)) {
+                counterPressPending = true;
+                return 0;
+            }
             if (expanded &&
                 x < MulDiv(220, static_cast<int>(dpi), 96) && !clickedTab) {
                 ReleaseCapture();
@@ -789,6 +889,9 @@ struct ChronoxWidget::Impl {
             switch (LOWORD(wParam)) {
             case MenuToggleWidget:
                 toggleVisibility();
+                return 0;
+            case MenuOpenDashboard:
+                dashboardOpenHandler();
                 return 0;
             case MenuAlwaysOnTop:
                 toggleAlwaysOnTop();
@@ -825,11 +928,13 @@ struct ChronoxWidget::Impl {
 
 ChronoxWidget::ChronoxWidget(SnapshotProvider snapshotProvider,
                              ExitHandler exitHandler,
+                             DashboardOpenHandler dashboardOpenHandler,
                              ErrorHandler errorHandler,
                              StartupStateProvider startupStateProvider,
                              StartupToggleHandler startupToggleHandler)
     : impl_(std::make_unique<Impl>(std::move(snapshotProvider),
                                    std::move(exitHandler),
+                                   std::move(dashboardOpenHandler),
                                    std::move(errorHandler),
                                    std::move(startupStateProvider),
                                    std::move(startupToggleHandler))) {}

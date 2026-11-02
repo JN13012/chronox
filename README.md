@@ -50,9 +50,13 @@ cumul du jour selon le fuseau horaire local et l’état de session. Le moteur
 expose `SessionDatabase::queryHistory` pour consulter en lecture seule les
 cumuls et segments réellement comptés d’une période, y compris une date
 antérieure. Le temps déclaré est distinct et indisponible en l’absence de
-données déclaratives. Le dashboard qui présentera ces informations n’est pas
-inclus dans P1. L’affichage se met à jour lors des transitions et chaque
-seconde uniquement lorsque le widget est déployé et que le suivi compte.
+données déclaratives. Le dashboard natif P1.3.1 fournit sa fenêtre et sa
+navigation ; ses pages de statistiques, d’historique et de paramètres seront
+complétées par étapes. Un clic sur le compteur du widget ou un double-clic sur
+l’icône de notification l’ouvre ; son menu propose également cette commande.
+Fermer le dashboard le masque sans arrêter Chronox. L’affichage du widget se
+met à jour lors des transitions et chaque seconde uniquement lorsqu’il est
+déployé et que le suivi compte.
 
 Une période encore en cours est sauvegardée au moins une fois par minute. Si
 Chronox s’arrête brutalement, la récupération clôt cette période à son dernier
