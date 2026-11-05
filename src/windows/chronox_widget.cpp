@@ -77,13 +77,17 @@ struct ChronoxWidget::Impl {
          DashboardOpenHandler dashboardOpenHandlerValue,
          ErrorHandler errorHandlerValue,
          StartupStateProvider startupStateProviderValue,
-         StartupToggleHandler startupToggleHandlerValue)
+         StartupToggleHandler startupToggleHandlerValue,
+         WidgetPage initialPageValue,
+         PageChangedHandler pageChangedHandlerValue)
         : snapshotProvider(std::move(snapshotProviderValue)),
           exitHandler(std::move(exitHandlerValue)),
           dashboardOpenHandler(std::move(dashboardOpenHandlerValue)),
           errorHandler(std::move(errorHandlerValue)),
           startupStateProvider(std::move(startupStateProviderValue)),
-          startupToggleHandler(std::move(startupToggleHandlerValue)) {}
+          startupToggleHandler(std::move(startupToggleHandlerValue)),
+          pageChangedHandler(std::move(pageChangedHandlerValue)),
+          currentPage(initialPageValue) {}
 
     ~Impl() {
         removeTrayIcon();
@@ -103,6 +107,7 @@ struct ChronoxWidget::Impl {
     ErrorHandler errorHandler;
     StartupStateProvider startupStateProvider;
     StartupToggleHandler startupToggleHandler;
+    PageChangedHandler pageChangedHandler;
     HWND window{};
     bool windowClassRegistered{};
     bool expanded{true};
@@ -113,6 +118,9 @@ struct ChronoxWidget::Impl {
     bool trayClickPending{};
     bool counterPressPending{};
     bool ignoreCounterRelease{};
+    bool navigationPressPending{};
+    int navigationPressDirection{};
+    WidgetPage currentPage{WidgetPage::Today};
     UINT dpi{96};
     WidgetSnapshot snapshot{};
     std::filesystem::path shellPath;
@@ -126,6 +134,7 @@ struct ChronoxWidget::Impl {
     ComPtr<ID2D1Bitmap> dialBitmap;
     ComPtr<IDWriteTextFormat> titleFormat;
     ComPtr<IDWriteTextFormat> durationFormat;
+    ComPtr<IDWriteTextFormat> periodDurationFormat;
     ComPtr<IDWriteTextFormat> statusFormat;
     ComPtr<IDWriteTextFormat> sessionFormat;
     ComPtr<ID2D1SolidColorBrush> panelBrush;
@@ -224,6 +233,7 @@ struct ChronoxWidget::Impl {
         };
         create(10.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, titleFormat);
         create(25.0f, DWRITE_FONT_WEIGHT_BOLD, durationFormat);
+        create(19.0f, DWRITE_FONT_WEIGHT_BOLD, periodDurationFormat);
         create(12.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, statusFormat);
         create(10.0f, DWRITE_FONT_WEIGHT_NORMAL, sessionFormat);
     }
@@ -370,6 +380,7 @@ struct ChronoxWidget::Impl {
         dialBitmap.Reset();
         titleFormat.Reset();
         durationFormat.Reset();
+        periodDurationFormat.Reset();
         statusFormat.Reset();
         sessionFormat.Reset();
         panelBrush.Reset();
@@ -534,19 +545,52 @@ struct ChronoxWidget::Impl {
         renderTarget->FillRoundedRectangle(panel, panelBrush.Get());
         renderTarget->DrawRoundedRectangle(panel, cyanBrush.Get(), 0.8f);
 
-        drawText(L"MESURE AUJOURD'HUI", titleFormat.Get(), mutedBrush.Get(),
-                 D2D1::RectF(54.0f, 94.0f, 196.0f, 112.0f));
-        const auto dayDuration = formatDayDuration(snapshot.dayDuration);
-        drawText(dayDuration.c_str(), durationFormat.Get(), whiteBrush.Get(),
+        const wchar_t* pageTitle = L"AUJOURD'HUI";
+        if (currentPage == WidgetPage::Week) {
+            pageTitle = L"CETTE SEMAINE";
+        } else if (currentPage == WidgetPage::Month) {
+            pageTitle = snapshot.monthLabel.c_str();
+        }
+        drawText(pageTitle, titleFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(75.0f, 94.0f, 175.0f, 112.0f));
+        drawNavigationArrow(-1);
+        drawNavigationArrow(1);
+
+        const auto duration =
+            currentPage == WidgetPage::Week
+                ? formatDayDuration(snapshot.weekDuration)
+                : currentPage == WidgetPage::Month
+                      ? formatDayDuration(snapshot.monthDuration)
+                      : formatDayDuration(snapshot.dayDuration);
+        const auto durationFormatForPage =
+            currentPage == WidgetPage::Today ? durationFormat.Get()
+                                             : periodDurationFormat.Get();
+        drawText(duration.c_str(), durationFormatForPage, whiteBrush.Get(),
                  D2D1::RectF(52.0f, 110.0f, 198.0f, 147.0f));
 
-        const auto status = snapshot.counting ? L"Session active" : L"Session en pause";
-        drawText(status, statusFormat.Get(),
-                 snapshot.counting ? activeBrush.Get() : mutedBrush.Get(),
-                 D2D1::RectF(54.0f, 145.0f, 196.0f, 163.0f));
-        const auto currentDuration = formatSessionDuration(snapshot.sessionDuration);
-        drawText(currentDuration.c_str(), sessionFormat.Get(), whiteBrush.Get(),
-                 D2D1::RectF(54.0f, 160.0f, 196.0f, 176.0f));
+        if (currentPage == WidgetPage::Today) {
+            const auto status =
+                snapshot.counting ? L"Suivi actif" : L"Suivi en pause";
+            drawText(status, statusFormat.Get(),
+                     snapshot.counting ? activeBrush.Get() : mutedBrush.Get(),
+                     D2D1::RectF(54.0f, 143.0f, 196.0f, 157.0f));
+            const auto currentDuration =
+                L"Session " + formatSessionDuration(snapshot.sessionDuration);
+            drawText(currentDuration.c_str(), sessionFormat.Get(),
+                     whiteBrush.Get(), D2D1::RectF(54.0f, 157.0f, 196.0f, 170.0f));
+        } else if (currentPage == WidgetPage::Week) {
+            const auto days =
+                std::to_wstring(snapshot.weekDaysWithDuration) +
+                (snapshot.weekDaysWithDuration == 1
+                     ? L" jour comptabilis\u00e9"
+                     : L" jours comptabilis\u00e9s");
+            drawText(days.c_str(), sessionFormat.Get(), whiteBrush.Get(),
+                     D2D1::RectF(54.0f, 148.0f, 196.0f, 170.0f));
+        } else {
+            drawText(L"Cumul mensuel", sessionFormat.Get(), whiteBrush.Get(),
+                     D2D1::RectF(54.0f, 148.0f, 196.0f, 170.0f));
+        }
+        drawPageIndicators();
 
         const auto retractTab = D2D1::RoundedRect(
             D2D1::RectF(219.0f, 108.0f, 249.0f, 143.0f), 8.0f, 8.0f);
@@ -558,6 +602,38 @@ struct ChronoxWidget::Impl {
         renderTarget->DrawLine(D2D1::Point2F(238.0f, 125.5f),
                                D2D1::Point2F(231.0f, 133.0f),
                                whiteBrush.Get(), 2.0f);
+    }
+
+    void drawNavigationArrow(int direction) {
+        const float x = direction < 0 ? 68.0f : 182.0f;
+        const float offset = direction < 0 ? -1.0f : 1.0f;
+        renderTarget->DrawLine(D2D1::Point2F(x - offset * 3.5f, 99.0f),
+                               D2D1::Point2F(x + offset * 2.5f, 103.0f),
+                               cyanBrush.Get(), 1.6f);
+        renderTarget->DrawLine(D2D1::Point2F(x + offset * 2.5f, 103.0f),
+                               D2D1::Point2F(x - offset * 3.5f, 107.0f),
+                               cyanBrush.Get(), 1.6f);
+        renderTarget->DrawLine(D2D1::Point2F(x - offset * 3.5f, 99.0f),
+                               D2D1::Point2F(x - offset * 3.5f, 107.0f),
+                               cyanBrush.Get(), 1.6f);
+    }
+
+    void drawPageIndicators() {
+        const int activeIndex = widgetPageIndex(currentPage);
+        for (int index = 0; index < 3; ++index) {
+            const float radius = index == activeIndex ? 2.2f : 1.5f;
+            renderTarget->FillEllipse(
+                D2D1::Ellipse(D2D1::Point2F(121.0f + index * 7.0f, 173.5f),
+                              radius, radius),
+                index == activeIndex ? cyanBrush.Get() : mutedBrush.Get());
+        }
+    }
+
+    void selectAdjacentPage(int direction) {
+        const WidgetPage nextPage = cycleWidgetPage(currentPage, direction);
+        pageChangedHandler(nextPage);
+        currentPage = nextPage;
+        render();
     }
 
     void drawCollapsed() {
@@ -751,6 +827,15 @@ struct ChronoxWidget::Impl {
                y < MulDiv(178, static_cast<int>(dpi), 96);
     }
 
+    int navigationHit(int x, int y) const {
+        if (!expanded) {
+            return 0;
+        }
+        return widgetNavigationDirection(
+            MulDiv(x, 96, static_cast<int>(dpi)),
+            MulDiv(y, 96, static_cast<int>(dpi)));
+    }
+
     void handleMessageError() noexcept {
         errorHandler(std::current_exception());
         PostQuitMessage(1);
@@ -823,6 +908,15 @@ struct ChronoxWidget::Impl {
             }
             const int x = GET_X_LPARAM(lParam);
             const int y = GET_Y_LPARAM(lParam);
+            if (navigationPressPending) {
+                const int direction = navigationPressDirection;
+                navigationPressPending = false;
+                navigationPressDirection = 0;
+                if (navigationHit(x, y) == direction) {
+                    selectAdjacentPage(direction);
+                }
+                return 0;
+            }
             const bool clickedTab =
                 x >= MulDiv(219, static_cast<int>(dpi), 96) &&
                 y >= MulDiv(108, static_cast<int>(dpi), 96) &&
@@ -838,6 +932,11 @@ struct ChronoxWidget::Impl {
             return 0;
         }
         case WM_LBUTTONDBLCLK:
+            if (navigationHit(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) != 0) {
+                navigationPressPending = false;
+                navigationPressDirection = 0;
+                return 0;
+            }
             if (isCounterHit(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
                 counterPressPending = false;
                 ignoreCounterRelease = true;
@@ -849,6 +948,13 @@ struct ChronoxWidget::Impl {
         case WM_LBUTTONDOWN: {
             const int x = GET_X_LPARAM(lParam);
             const int y = GET_Y_LPARAM(lParam);
+            const int direction = navigationHit(x, y);
+            if (direction != 0) {
+                navigationPressPending = true;
+                navigationPressDirection = direction;
+                counterPressPending = false;
+                return 0;
+            }
             const bool clickedTab =
                 x >= MulDiv(219, static_cast<int>(dpi), 96) &&
                 y >= MulDiv(108, static_cast<int>(dpi), 96) &&
@@ -931,13 +1037,17 @@ ChronoxWidget::ChronoxWidget(SnapshotProvider snapshotProvider,
                              DashboardOpenHandler dashboardOpenHandler,
                              ErrorHandler errorHandler,
                              StartupStateProvider startupStateProvider,
-                             StartupToggleHandler startupToggleHandler)
+                             StartupToggleHandler startupToggleHandler,
+                             WidgetPage initialPage,
+                             PageChangedHandler pageChangedHandler)
     : impl_(std::make_unique<Impl>(std::move(snapshotProvider),
                                    std::move(exitHandler),
                                    std::move(dashboardOpenHandler),
                                    std::move(errorHandler),
                                    std::move(startupStateProvider),
-                                   std::move(startupToggleHandler))) {}
+                                   std::move(startupToggleHandler),
+                                   initialPage,
+                                   std::move(pageChangedHandler))) {}
 
 ChronoxWidget::~ChronoxWidget() = default;
 

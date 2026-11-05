@@ -82,10 +82,18 @@ Windows, serveur, service cloud et mesure antérieure au démarrage du programme
 - Les événements redondants ne changent pas l’état ni le cumul. Les événements
   de verrouillage/déverrouillage reçus pendant la veille mettent à jour l’état
   de session sans faire tourner le compteur.
-- Le widget P1 affiche le cumul local du jour, l’état de session et la durée
-  cumulée par le tracker depuis le lancement courant. Il rafraîchit l’affichage
-  une fois par seconde seulement lorsque le widget est déployé et que le suivi
-  compte ; le timer de persistance reste à une minute.
+- Le widget propose les vues Aujourd’hui, Cette semaine (lundi à dimanche) et
+  Ce mois, avec la vue du jour par défaut. Les cumuls et les jours actifs
+  proviennent des intervalles réels SQLite ; la sélection est persistée dans
+  les préférences HKCU.
+- La vue Aujourd’hui distingue le cumul depuis minuit de la durée active
+  continue depuis la dernière reprise. Cette durée repart de zéro après un
+  verrouillage, une veille ou une interruption du suivi ; une session traversant
+  minuit conserve sa durée continue tandis que les cumuls calendaires suivent
+  leurs propres limites.
+- Le widget rafraîchit l’affichage une fois par seconde seulement lorsque le
+  widget est déployé et que le suivi compte ; le timer de persistance reste à
+  une minute.
 - La fenêtre est positionnée au démarrage en bas à droite de la zone de travail
   du moniteur principal, au-dessus de la barre des tâches. Une languette permet
   de la rétracter ou de la déployer. L’icône de notification permet de masquer,

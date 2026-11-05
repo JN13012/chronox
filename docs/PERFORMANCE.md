@@ -98,6 +98,23 @@ minute auraient donc ralenti avec l’historique. La nouvelle requête évite ce
 parcours complet. La suite de tests contient un cas de régression avec 100 000
 intervalles anciens, sans seuil de temps dépendant de la machine.
 
+### Validation des vues du widget
+
+La validation Release de la version à trois vues a compilé l’application et
+les six suites CTest sous MSVC ; elles ont toutes réussi en 1,63 s. La suite
+SQLite (0,92 s) inclut les régressions jour/semaine/mois, les jours distincts
+avec du temps, le passage à minuit et des rapports face à 100 000 intervalles
+historiques. Ces durées sont celles des tests et non une mesure de latence ou
+de consommation du widget en fonctionnement.
+
+Le rafraîchissement actif effectue trois lectures SQLite indexées (cumul du
+jour, rapport de la semaine et rapport du mois). Le rapport hebdomadaire
+calcule aussi les jours distincts en parcourant les intervalles déjà retournés ;
+le rapport mensuel garde le même coût borné à sa période. Le rendu reste
+Direct2D/DirectWrite et n’ajoute ni bitmap ni thread. Un échantillonnage CPU
+interactif de cette version, WPR/WPA et une validation visuelle des trois vues
+restent à effectuer manuellement.
+
 ## Audit statique du comportement
 
 - **Repos CPU :** la boucle de messages Windows attend dans `GetMessageW`; il

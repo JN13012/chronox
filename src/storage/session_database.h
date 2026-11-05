@@ -3,6 +3,7 @@
 #include "calendar_period.h"
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -15,6 +16,7 @@ struct HistoryReport {
     TimeRange range;
     std::chrono::microseconds sessionDuration{};
     std::vector<TimeRange> sessionIntervals;
+    std::size_t daysWithDuration{};
     std::optional<std::chrono::microseconds> declaredWorkDuration;
 };
 
@@ -48,7 +50,8 @@ private:
     std::chrono::microseconds duration(TimeRange range, Timestamp now) const;
     HistoryReport queryHistory(TimeRange range,
                                CalendarPeriod period,
-                               Timestamp now) const;
+                               Timestamp now,
+                               const CalendarTimeConverter* converter) const;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

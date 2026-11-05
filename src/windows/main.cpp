@@ -2,6 +2,7 @@
 #include "window_coordinator.h"
 #include "windows_session_monitor.h"
 #include "windows_startup.h"
+#include "widget_preferences.h"
 
 #include "../core/calendar_period.h"
 #include "../core/utc_timestamp_clock.h"
@@ -11,6 +12,7 @@
 #include <objbase.h>
 
 #include <chrono>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <memory>
@@ -121,6 +123,17 @@ void reportError(const std::exception& error) {
                 MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
 }
 
+std::wstring currentMonthLabel(chronox::Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    std::tm local{};
+    if (localtime_s(&local, &value) != 0) {
+        throw std::runtime_error("Could not read the current local month");
+    }
+    return chronox::formatMonthYear(local.tm_mon + 1, local.tm_year + 1900);
+}
+
 int runChronox(bool startHidden,
                bool quietIfAlreadyRunning,
                chronox::WindowsStartup& startup) {
@@ -140,6 +153,7 @@ int runChronox(bool startHidden,
     bool stopped = false;
     chronox::UtcTimestampClock utcClock;
     chronox::SessionDatabase database(databasePath());
+    chronox::WidgetPreferences widgetPreferences;
     utcClock.alignWithPersistedTime(database.latestRecordedTimestamp());
     std::unique_ptr<chronox::ChronoxWidget> widget;
 
@@ -215,11 +229,21 @@ int runChronox(bool startHidden,
             [&] {
                 const auto now = SessionTracker::Clock::now();
                 const auto timestamp = utcClock.at(now);
+                const auto week = database.queryHistory(
+                    chronox::CalendarPeriod::Week, timestamp, timestamp);
+                const auto month = database.queryHistory(
+                    chronox::CalendarPeriod::Month, timestamp, timestamp);
                 return chronox::WidgetSnapshot{
                     std::chrono::duration_cast<std::chrono::seconds>(
                         database.duration(chronox::CalendarPeriod::Day, timestamp)),
                     std::chrono::duration_cast<std::chrono::seconds>(
-                        tracker->elapsed(now)),
+                        tracker->currentSessionElapsed(now)),
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        week.sessionDuration),
+                    week.daysWithDuration,
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        month.sessionDuration),
+                    currentMonthLabel(timestamp),
                     tracker->isCounting()};
             },
             stop,
@@ -229,6 +253,10 @@ int runChronox(bool startHidden,
             [&] {
                 startup.setEnabled(
                     startup.state() != chronox::StartupState::Enabled);
+            },
+            widgetPreferences.selectedPage(),
+            [&](chronox::WidgetPage page) {
+                widgetPreferences.setSelectedPage(page);
             });
         widget->create(!startHidden);
         monitor.run();

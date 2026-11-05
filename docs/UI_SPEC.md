@@ -105,8 +105,12 @@ Implémenté dans le prototype Windows :
 - rendu per-pixel alpha avec WIC, Direct2D et DirectWrite ; les bitmaps sont
   réduits à l’échelle d’affichage et gardés en cache jusqu’au changement DPI ou
   au basculement entre les états déployé et rétracté ;
-- cumul mesuré du jour, état actif/en pause et durée de suivi depuis le
-  lancement courant ;
+- trois vues dans le cadran (jour, semaine lundi-dimanche, mois/année), avec
+  flèches de navigation et indicateurs discrets ; la sélection est mémorisée
+  dans les préférences HKCU ;
+- cumul réel SQLite correspondant à la vue, état actif/en pause et durée de la
+  session continue, remise à zéro au verrouillage, à la veille ou à
+  l’interruption du suivi ;
 - languette de rétraction/déploiement et déplacement de la fenêtre par
   glisser-déposer ;
 - icône officielle Chronox intégrée à l’exécutable et utilisée dans la zone de

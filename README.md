@@ -2,7 +2,8 @@
 
 Chronox est une application native Windows 10/11 en C++20 qui mesure le temps
 pendant lequel la session utilisateur est déverrouillée et le PC éveillé.
-Le prototype du widget V0.4 affiche le cumul du jour et l’état de session.
+Le widget propose les cumuls du jour, de la semaine et du mois, ainsi que l’état
+de suivi et la durée de la session active continue.
 L’application fonctionne localement, sans serveur ni service cloud ; les
 intervalles sont conservés dans une base SQLite.
 
@@ -39,14 +40,18 @@ nécessiter le Microsoft Visual C++ Redistributable 2015–2022 x64.
 
 Après la réussite complète du workflow Windows, l’exécutable et ses ressources
 `assets\ui` sont téléchargeables comme artefact `chronox-windows-x64` dans
-l’exécution GitHub Actions correspondante. Aucun installateur n’est fourni.
+l’exécution GitHub Actions correspondante. Aucun installateur distribué n’est
+fourni ; le script local ci-dessous sert aux mises à jour de développement.
 
 ## Données et rapports
 
 La base est créée automatiquement dans
 `%LOCALAPPDATA%\Chronox\chronox.db`. Elle conserve les périodes de mesure après
-la fermeture de Chronox et le redémarrage de Windows. Le widget affiche le
-cumul du jour selon le fuseau horaire local et l’état de session. Le moteur
+la fermeture de Chronox et le redémarrage de Windows. Le widget propose les
+vues Aujourd'hui, Cette semaine (lundi à dimanche) et Ce mois ; les jours
+comptabilisés proviennent des intervalles réels. La vue Aujourd'hui distingue
+le cumul depuis minuit de la session active continue, remise à zéro après un
+verrouillage, une veille ou une interruption du suivi. Le moteur
 expose `SessionDatabase::queryHistory` pour consulter en lecture seule les
 cumuls et segments réellement comptés d’une période, y compris une date
 antérieure. Le temps déclaré est distinct et indisponible en l’absence de
@@ -77,6 +82,16 @@ de l’entrée de démarrage ; les fichiers d’une version en cours ne sont pas
 ne réactivent pas un démarrage désactivé depuis Windows. Les anciens dossiers
 de version ne sont pas supprimés automatiquement pour éviter d’effacer un
 exécutable encore utilisé.
+
+Après une compilation Release, le script facultatif
+`scripts\install-local.ps1` installe l'exécutable et ses PNG dans un nouveau
+sous-dossier versionné de `%LOCALAPPDATA%\Programs\Chronox`. Il ne ferme pas
+Chronox, n'écrase aucune version en cours, ne touche ni à la base ni aux
+préférences et ne crée jamais une entrée de démarrage. Il ne met à jour le
+chemin HKCU Run que si une inscription Chronox existante pointe déjà vers une
+version installée. Après avoir quitté Chronox manuellement pour tester une
+nouvelle version, lancer `.\scripts\install-local.ps1 -Launch` ; sans cette
+option, le script se limite à l'installation.
 
 Voir [docs/SPEC.md](docs/SPEC.md) pour le périmètre, les règles de mesure et les
 vérifications manuelles. Voir [docs/PERFORMANCE.md](docs/PERFORMANCE.md) pour

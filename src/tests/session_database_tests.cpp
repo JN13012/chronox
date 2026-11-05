@@ -367,6 +367,64 @@ void historicalQueriesReturnOnlyCountedIntervals() {
             "the previous date contains only its counted session segments");
 }
 
+void crossMidnightSessionsPreserveSessionAndSplitDailyTotals() {
+    TemporaryDatabase file;
+    const Timestamp beforeMidnight =
+        toMicroseconds(localTimestamp(2024, 6, 15, 23)) +
+        toTimestampTicks(50min);
+    const auto firstDay =
+        chronox::calendarPeriodContaining(beforeMidnight, CalendarPeriod::Day);
+    const auto secondDay =
+        chronox::calendarPeriodContaining(firstDay.end, CalendarPeriod::Day);
+    SessionDatabase database(file.path());
+    database.setCounting(true, firstDay.end - toTimestampTicks(10min));
+    database.setCounting(false, secondDay.start + toTimestampTicks(10min));
+
+    const auto yesterday =
+        database.queryHistory(CalendarPeriod::Day, firstDay.start,
+                              secondDay.start + toTimestampTicks(10min));
+    const auto today =
+        database.queryHistory(CalendarPeriod::Day, secondDay.start,
+                              secondDay.start + toTimestampTicks(10min));
+    require(yesterday.sessionDuration == 10min &&
+                today.sessionDuration == 10min,
+            "midnight splits the counted daily totals without losing time");
+    require(yesterday.sessionIntervals.size() == 1 &&
+                today.sessionIntervals.size() == 1,
+            "both days retain the clipped parts of the same continuous interval");
+}
+
+void weeklyReportsCountDistinctDaysWithRecordedTime() {
+    TemporaryDatabase file;
+    const Timestamp reference =
+        toMicroseconds(localTimestamp(2024, 6, 15, 12));
+    const auto week =
+        chronox::calendarPeriodContaining(reference, CalendarPeriod::Week);
+    const auto monday =
+        chronox::calendarPeriodContaining(week.start, CalendarPeriod::Day);
+    const auto tuesday =
+        chronox::calendarPeriodContaining(monday.end, CalendarPeriod::Day);
+    const auto wednesday =
+        chronox::calendarPeriodContaining(tuesday.end, CalendarPeriod::Day);
+    SessionDatabase database(file.path());
+
+    database.setCounting(true, monday.start + toTimestampTicks(1h));
+    database.setCounting(false, monday.start + toTimestampTicks(2h));
+    database.setCounting(true, tuesday.start + toTimestampTicks(3h));
+    database.setCounting(false, tuesday.start + toTimestampTicks(4h));
+    database.setCounting(true, tuesday.start + toTimestampTicks(5h));
+    database.setCounting(false, tuesday.start + toTimestampTicks(6h));
+    database.setCounting(true, wednesday.start + toTimestampTicks(7h));
+    database.setCounting(false, wednesday.start + toTimestampTicks(8h));
+
+    const auto report =
+        database.queryHistory(CalendarPeriod::Week, reference, week.end);
+    require(report.sessionDuration == 4h,
+            "weekly total sums all intervals in the Monday-to-Sunday range");
+    require(report.daysWithDuration == 3,
+            "weekly reports count distinct days with nonzero measured time");
+}
+
 void recentStatisticsIgnoreLargeHistoricalIntervals() {
     TemporaryDatabase file;
     const auto today =
@@ -414,6 +472,19 @@ void recentStatisticsIgnoreLargeHistoricalIntervals() {
     database.checkpoint(start + toTimestampTicks(45s));
     require(database.duration(CalendarPeriod::Day, start + toTimestampTicks(45s)) == 45s,
             "daily reports include the active interval and exclude 100,000 older ones");
+    const auto week = database.queryHistory(
+        CalendarPeriod::Week, start + toTimestampTicks(45s),
+        start + toTimestampTicks(45s));
+    const auto month = database.queryHistory(
+        CalendarPeriod::Month, start + toTimestampTicks(45s),
+        start + toTimestampTicks(45s));
+    const auto now = start + toTimestampTicks(45s);
+    require(week.sessionDuration == database.duration(CalendarPeriod::Week, now) &&
+                month.sessionDuration ==
+                    database.duration(CalendarPeriod::Month, now) &&
+                week.daysWithDuration > 0 && week.daysWithDuration <= 7 &&
+                month.daysWithDuration > 0 && month.daysWithDuration <= 31,
+            "weekly and monthly widget reports match bounded calendar totals");
 }
 
 void newerDatabaseSchemasAreNotOverwritten() {
@@ -637,6 +708,8 @@ int main() {
     corruptDatabasesAreRejectedWithoutBeingRewritten();
     sessionsCrossingMidnightBelongToBothCalendarDays();
     historicalQueriesReturnOnlyCountedIntervals();
+    crossMidnightSessionsPreserveSessionAndSplitDailyTotals();
+    weeklyReportsCountDistinctDaysWithRecordedTime();
     recentStatisticsIgnoreLargeHistoricalIntervals();
     newerDatabaseSchemasAreNotOverwritten();
     allCalendarPeriodsAggregateTheirFullRange();

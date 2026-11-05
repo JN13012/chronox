@@ -437,7 +437,8 @@ std::chrono::microseconds SessionDatabase::duration(
 HistoryReport SessionDatabase::queryHistory(CalendarPeriod period,
                                             Timestamp dateAnchor,
                                             Timestamp now) const {
-    return queryHistory(calendarPeriodContaining(dateAnchor, period), period, now);
+    return queryHistory(calendarPeriodContaining(dateAnchor, period), period, now,
+                        nullptr);
 }
 
 HistoryReport SessionDatabase::queryHistory(
@@ -445,13 +446,14 @@ HistoryReport SessionDatabase::queryHistory(
     Timestamp dateAnchor,
     Timestamp now,
     const CalendarTimeConverter& converter) const {
-    return queryHistory(
-        calendarPeriodContaining(dateAnchor, period, converter), period, now);
+    return queryHistory(calendarPeriodContaining(dateAnchor, period, converter),
+                        period, now, &converter);
 }
 
 HistoryReport SessionDatabase::queryHistory(TimeRange range,
                                             CalendarPeriod period,
-                                            Timestamp now) const {
+                                            Timestamp now,
+                                            const CalendarTimeConverter* converter) const {
     const Timestamp effectiveEnd = std::min(range.end, now);
     Statement query(
         impl_->database,
@@ -474,6 +476,32 @@ HistoryReport SessionDatabase::queryHistory(TimeRange range,
         }
         report.sessionIntervals.push_back({start, end});
         report.sessionDuration += std::chrono::microseconds(end - start);
+    }
+
+    Timestamp dayStart = range.start;
+    std::size_t intervalIndex = 0;
+    while (dayStart < effectiveEnd) {
+        const TimeRange dayRange =
+            converter == nullptr
+                ? calendarPeriodContaining(dayStart, CalendarPeriod::Day)
+                : calendarPeriodContaining(dayStart, CalendarPeriod::Day,
+                                           *converter);
+        while (intervalIndex < report.sessionIntervals.size() &&
+               report.sessionIntervals[intervalIndex].end <= dayRange.start) {
+            ++intervalIndex;
+        }
+        const bool hasDuration =
+            intervalIndex < report.sessionIntervals.size() &&
+            report.sessionIntervals[intervalIndex].start < dayRange.end &&
+            report.sessionIntervals[intervalIndex].end > dayRange.start;
+        if (hasDuration) {
+            ++report.daysWithDuration;
+        }
+        if (dayRange.end <= dayStart) {
+            throw std::runtime_error(
+                "Calendar day did not advance while counting Chronox days");
+        }
+        dayStart = dayRange.end;
     }
     return report;
 }
