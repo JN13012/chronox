@@ -117,6 +117,7 @@ struct ChronoxWidget::Impl {
     bool refreshTimerSet{};
     bool widgetClickPending{};
     bool trayClickPending{};
+    bool ignoreNextTrayClick{};
     UINT taskbarCreatedMessage{};
     bool counterPressPending{};
     bool ignoreCounterRelease{};
@@ -766,14 +767,20 @@ struct ChronoxWidget::Impl {
         }
     }
 
-    void handleTrayCallback(LPARAM lParam) {
+    void handleTrayCallback(WPARAM, LPARAM lParam) {
+        if (HIWORD(lParam) != TrayIconId) {
+            return;
+        }
         switch (LOWORD(lParam)) {
         case NIN_SELECT:
         case WM_LBUTTONUP:
-            queueTrayClick();
+            if (!ignoreNextTrayClick) {
+                queueTrayClick();
+            }
             break;
         case WM_LBUTTONDBLCLK:
             cancelPendingTrayClick();
+            ignoreTrailingTrayClick();
             dashboardOpenHandler();
             break;
         case NIN_KEYSELECT:
@@ -797,6 +804,14 @@ struct ChronoxWidget::Impl {
             throw windowsError("SetTimer(tray click)", GetLastError());
         }
         trayClickPending = true;
+    }
+
+    void ignoreTrailingTrayClick() {
+        ignoreNextTrayClick = true;
+        if (SetTimer(window, TrayClickTimerId, GetDoubleClickTime(), nullptr) ==
+            0) {
+            throw windowsError("SetTimer(double-click release)", GetLastError());
+        }
     }
 
     void cancelPendingTrayClick() {
@@ -899,6 +914,12 @@ struct ChronoxWidget::Impl {
         case WM_TIMER:
             if (wParam == RefreshTimerId) {
                 refresh();
+            } else if (wParam == TrayClickTimerId && ignoreNextTrayClick) {
+                if (!KillTimer(hwnd, TrayClickTimerId)) {
+                    throw windowsError("KillTimer(double-click release)",
+                                       GetLastError());
+                }
+                ignoreNextTrayClick = false;
             } else if (wParam == TrayClickTimerId && trayClickPending) {
                 if (!KillTimer(hwnd, TrayClickTimerId)) {
                     throw windowsError("KillTimer(tray click)", GetLastError());
@@ -1026,7 +1047,7 @@ struct ChronoxWidget::Impl {
             }
             return 0;
         case TrayCallbackMessage:
-            handleTrayCallback(lParam);
+            handleTrayCallback(wParam, lParam);
             return 0;
         case WM_DESTROY:
             removeTrayIcon();
