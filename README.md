@@ -91,7 +91,38 @@ préférences et ne crée jamais une entrée de démarrage. Il ne met à jour le
 chemin HKCU Run que si une inscription Chronox existante pointe déjà vers une
 version installée. Après avoir quitté Chronox manuellement pour tester une
 nouvelle version, lancer `.\scripts\install-local.ps1 -Launch` ; sans cette
-option, le script se limite à l'installation.
+option, le script se limite à l'installation. Pour compiler en Release puis
+installer en une commande, utiliser `.\scripts\install-local.ps1 -Build`.
+L'option `-Launch` demande également un lancement après installation ; si
+Chronox fonctionne déjà, ce lancement est ignoré plutôt que de créer une
+seconde instance. Les anciennes versions restent disponibles pour un retour
+arrière manuel.
+
+Les scripts fonctionnent sous Windows PowerShell 5.1 et PowerShell 7 :
+
+```powershell
+# Compiler si nécessaire, puis installer sans fermer Chronox
+.\scripts\install-local.ps1 -Build
+
+# Installer puis lancer explicitement (Chronox doit être arrêté)
+.\scripts\install-local.ps1 -Launch
+
+# Prévisualiser ou confirmer la désinstallation de l’application uniquement
+.\scripts\uninstall-local.ps1 -WhatIf
+.\scripts\uninstall-local.ps1
+
+# Prévisualiser ou confirmer le nettoyage des builds CMake/MSVC du dépôt
+.\scripts\clean-build.ps1 -WhatIf
+.\scripts\clean-build.ps1
+```
+
+La désinstallation demande confirmation avant la fermeture normale d’une
+instance installée et avant les suppressions. Elle ne supprime jamais la base,
+les sauvegardes SQLite ni les préférences dans `%LOCALAPPDATA%\Chronox`.
+Le nettoyage ne cible que les dossiers de build CMake dont le cache identifie
+ce dépôt ; il conserve un dossier utilisé par un processus Chronox.
+`-WhatIf` affiche les opérations envisagées sans les exécuter. Aucun de ces
+scripts n’active le démarrage Windows ou ne requiert de privilèges administrateur.
 
 Voir [docs/SPEC.md](docs/SPEC.md) pour le périmètre, les règles de mesure et les
 vérifications manuelles. Voir [docs/PERFORMANCE.md](docs/PERFORMANCE.md) pour
