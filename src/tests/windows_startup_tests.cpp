@@ -100,6 +100,22 @@ public:
                 "StartupApproved test state can be written");
     }
 
+    void setRunCommand(const std::wstring& command) const {
+        const std::wstring keyPath = baseKey_ + L"\\Run";
+        HKEY key = nullptr;
+        const LONG openResult = RegCreateKeyExW(
+            HKEY_CURRENT_USER, keyPath.c_str(), 0, nullptr, 0, KEY_SET_VALUE,
+            nullptr, &key, nullptr);
+        require(openResult == ERROR_SUCCESS, "Chronox Run test key can be created");
+        const LONG writeResult = RegSetValueExW(
+            key, L"Chronox", 0, REG_SZ,
+            reinterpret_cast<const BYTE*>(command.c_str()),
+            static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+        RegCloseKey(key);
+        require(writeResult == ERROR_SUCCESS,
+                "Chronox Run test command can be written");
+    }
+
 private:
     std::wstring baseKey_;
 };
@@ -155,13 +171,20 @@ void startupRegistrationTracksWindowsAndUpdatesSafely() {
     RegistryScope registry;
     const auto source = temporary.path() / L"build" / L"chronox.exe";
     const auto sourceUi = source.parent_path() / L"assets" / L"ui";
+    const auto installRoot = temporary.path() / L"Programs" / L"Chronox";
+    const auto installed = installRoot / L"chronox.exe";
     writeFile(source, "version-one");
     writeFile(sourceUi / L"chronox-shell.png", "shell-one");
     writeFile(sourceUi / L"chronox-dial-background.png", "dial-one");
+    writeFile(installed, "installed-one");
+    writeFile(installRoot / L"assets" / L"ui" / L"chronox-shell.png",
+              "installed-shell");
+    writeFile(
+        installRoot / L"assets" / L"ui" / L"chronox-dial-background.png",
+        "installed-dial");
 
     chronox::WindowsStartup startup(
-        {temporary.path() / L"Programs" / L"Chronox", source,
-         registry.baseKey()});
+        {installRoot, source, registry.baseKey()});
     require(startup.state() == chronox::StartupState::NotConfigured,
             "startup is disabled until explicitly enabled");
 
@@ -171,39 +194,36 @@ void startupRegistrationTracksWindowsAndUpdatesSafely() {
     const auto firstCommand =
         readRunCommand(registry.baseKey() + L"\\Run");
     const auto firstExecutable = executableFromCommand(firstCommand);
-    require(firstExecutable.parent_path().parent_path() ==
-                temporary.path() / L"Programs" / L"Chronox",
-            "startup points inside the stable per-user program directory");
-    require(readFile(firstExecutable) == "version-one" &&
+    require(firstExecutable == installed,
+            "startup points to the stable chronox.exe path");
+    require(readFile(firstExecutable) == "installed-one" &&
                 readFile(firstExecutable.parent_path() / L"assets" / L"ui" /
-                         L"chronox-shell.png") == "shell-one" &&
+                         L"chronox-shell.png") == "installed-shell" &&
                 readFile(firstExecutable.parent_path() / L"assets" / L"ui" /
-                         L"chronox-dial-background.png") == "dial-one",
-            "the executable and both required PNG assets are deployed together");
+                         L"chronox-dial-background.png") == "installed-dial",
+            "startup validates the stable executable and its required PNG assets");
 
     writeFile(source, "version-two");
     writeFile(sourceUi / L"chronox-shell.png", "shell-two");
-    require(startup.synchronizeInstalledVersion(),
-            "a changed executable and its resources are installed as a new version");
-    const auto secondCommand =
-        readRunCommand(registry.baseKey() + L"\\Run");
-    const auto secondExecutable = executableFromCommand(secondCommand);
-    require(secondExecutable != firstExecutable &&
-                std::filesystem::is_regular_file(firstExecutable) &&
-                readFile(firstExecutable) == "version-one",
-            "updating never replaces files used by the prior running version");
-    require(readFile(secondExecutable) == "version-two" &&
-                readFile(secondExecutable.parent_path() / L"assets" / L"ui" /
-                         L"chronox-shell.png") == "shell-two",
-            "the startup registration is switched only to the complete update");
+    require(!startup.synchronizeInstalledVersion() &&
+                readFile(installed) == "installed-one",
+            "application startup never deploys or overwrites binaries");
 
     registry.setApproval(0x03);
     require(startup.state() == chronox::StartupState::DisabledByWindows,
             "a Task Manager disabled state is reflected by the option");
-    writeFile(source, "version-three");
+    const auto previousVersion =
+        installRoot / L"version-old" / L"chronox.exe";
+    writeFile(previousVersion, "legacy");
+    registry.setRunCommand(L"\"" + previousVersion.wstring() + L"\" --startup");
     require(startup.synchronizeInstalledVersion() &&
                 startup.state() == chronox::StartupState::DisabledByWindows,
-            "version updates preserve Windows' disabled startup state");
+            "legacy entries move to the stable path without changing Windows' state");
+    require(executableFromCommand(
+                readRunCommand(registry.baseKey() + L"\\Run")) == installed,
+            "the stable path replaces an in-install legacy Run target");
+    require(readFile(previousVersion) == "legacy",
+            "legacy executables remain untouched during path migration");
 
     startup.setEnabled(true);
     require(startup.state() == chronox::StartupState::Enabled,
@@ -219,13 +239,13 @@ void missingAssetsDoNotEnableStartup() {
     RegistryScope registry;
     const auto source = temporary.path() / L"build" / L"chronox.exe";
     writeFile(source, "version-one");
-    writeFile(source.parent_path() / L"assets" / L"ui" /
-                  L"chronox-shell.png",
+    const auto installRoot = temporary.path() / L"Programs" / L"Chronox";
+    writeFile(installRoot / L"chronox.exe", "installed");
+    writeFile(installRoot / L"assets" / L"ui" / L"chronox-shell.png",
               "shell");
 
     chronox::WindowsStartup startup(
-        {temporary.path() / L"Programs" / L"Chronox", source,
-         registry.baseKey()});
+        {installRoot, source, registry.baseKey()});
     bool rejected = false;
     try {
         startup.setEnabled(true);

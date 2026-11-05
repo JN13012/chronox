@@ -28,7 +28,6 @@ public:
     bool synchronizeInstalledVersion();
 
 private:
-    std::filesystem::path deployCurrentVersion() const;
     std::wstring runKeyPath() const;
     std::wstring startupApprovedKeyPath() const;
 

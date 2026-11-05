@@ -29,6 +29,7 @@ using Microsoft::WRL::ComPtr;
 
 constexpr wchar_t WidgetClassName[] = L"ChronoxV04WidgetWindow";
 constexpr UINT TrayCallbackMessage = WM_APP + 1;
+constexpr wchar_t TaskbarCreatedMessageName[] = L"TaskbarCreated";
 constexpr UINT_PTR RefreshTimerId = 2;
 constexpr UINT_PTR WidgetClickTimerId = 3;
 constexpr UINT_PTR TrayClickTimerId = 4;
@@ -116,6 +117,7 @@ struct ChronoxWidget::Impl {
     bool refreshTimerSet{};
     bool widgetClickPending{};
     bool trayClickPending{};
+    UINT taskbarCreatedMessage{};
     bool counterPressPending{};
     bool ignoreCounterRelease{};
     bool navigationPressPending{};
@@ -204,6 +206,12 @@ struct ChronoxWidget::Impl {
         dpi = GetDpiForWindow(window);
         if (dpi == 0) {
             throw windowsError("GetDpiForWindow", GetLastError());
+        }
+        taskbarCreatedMessage =
+            RegisterWindowMessageW(TaskbarCreatedMessageName);
+        if (taskbarCreatedMessage == 0) {
+            throw windowsError("RegisterWindowMessageW(TaskbarCreated)",
+                               GetLastError());
         }
         createTextFormats();
         createRenderResources();
@@ -398,7 +406,7 @@ struct ChronoxWidget::Impl {
         data.cbSize = sizeof(data);
         data.hWnd = window;
         data.uID = TrayIconId;
-        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         data.uCallbackMessage = TrayCallbackMessage;
         data.hIcon = LoadIconW(GetModuleHandleW(nullptr),
                                MAKEINTRESOURCEW(IDI_CHRONOX));
@@ -873,6 +881,11 @@ struct ChronoxWidget::Impl {
 
     LRESULT handleWindowMessage(HWND hwnd, UINT message,
                                 WPARAM wParam, LPARAM lParam) {
+        if (message == taskbarCreatedMessage) {
+            trayIconAdded = false;
+            addTrayIcon();
+            return 0;
+        }
         switch (message) {
         case WM_PAINT: {
             PAINTSTRUCT paint{};

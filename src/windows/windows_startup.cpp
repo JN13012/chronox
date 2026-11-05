@@ -7,7 +7,6 @@
 #include <windows.h>
 #include <objbase.h>
 
-#include <algorithm>
 #include <array>
 #include <fstream>
 #include <optional>
@@ -16,7 +15,6 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
-#include <vector>
 
 namespace chronox {
 namespace {
@@ -210,146 +208,49 @@ std::filesystem::path parseRunExecutable(const std::wstring& command) {
     return command.substr(1, command.size() - StartupArgument.size() - 2);
 }
 
-bool sameFileContents(const std::filesystem::path& left,
-                     const std::filesystem::path& right) {
-    std::error_code error;
-    const auto leftSize = std::filesystem::file_size(left, error);
-    if (error) {
-        return false;
-    }
-    const auto rightSize = std::filesystem::file_size(right, error);
-    if (error || leftSize != rightSize) {
-        return false;
-    }
-
-    std::ifstream leftFile(left, std::ios::binary);
-    std::ifstream rightFile(right, std::ios::binary);
-    if (!leftFile || !rightFile) {
-        throw std::runtime_error("Could not read Chronox files for update comparison");
-    }
-
-    std::array<char, 8192> leftBuffer{};
-    std::array<char, 8192> rightBuffer{};
-    while (leftFile && rightFile) {
-        leftFile.read(leftBuffer.data(),
-                      static_cast<std::streamsize>(leftBuffer.size()));
-        rightFile.read(rightBuffer.data(),
-                       static_cast<std::streamsize>(rightBuffer.size()));
-        if (leftFile.gcount() != rightFile.gcount() ||
-            !std::equal(leftBuffer.begin(),
-                        leftBuffer.begin() + leftFile.gcount(),
-                        rightBuffer.begin())) {
-            return false;
-        }
-    }
-    if ((!leftFile.eof() && leftFile.fail()) ||
-        (!rightFile.eof() && rightFile.fail())) {
-        throw std::runtime_error("Could not compare Chronox files for update");
-    }
-    return leftFile.eof() && rightFile.eof();
+std::filesystem::path stableExecutable(const WindowsStartupPaths& paths) {
+    return paths.installRoot / paths.executable.filename();
 }
 
-bool sameInstalledAssets(const std::filesystem::path& sourceExecutable,
-                         const std::filesystem::path& installedExecutable) {
-    const auto sourceAssets =
-        sourceExecutable.parent_path() / L"assets" / L"ui";
+bool hasRequiredAssets(const std::filesystem::path& executable) {
     const auto installedAssets =
-        installedExecutable.parent_path() / L"assets" / L"ui";
+        executable.parent_path() / L"assets" / L"ui";
     for (const wchar_t* name : {ShellImageName, DialImageName}) {
-        const auto sourceImage = sourceAssets / name;
         const auto installedImage = installedAssets / name;
-        if (!std::filesystem::is_regular_file(sourceImage)) {
-            throw std::runtime_error(
-                "Chronox image asset is missing beside the executable: " +
-                sourceImage.string());
-        }
-        if (!std::filesystem::is_regular_file(installedImage) ||
-            !sameFileContents(sourceImage, installedImage)) {
+        if (!std::filesystem::is_regular_file(installedImage)) {
             return false;
         }
     }
     return true;
 }
 
-std::wstring uniqueDeploymentName() {
-    GUID value{};
-    const HRESULT result = CoCreateGuid(&value);
-    if (FAILED(result)) {
-        throw std::runtime_error("CoCreateGuid failed with HRESULT " +
-                                 std::to_string(static_cast<unsigned long>(result)));
-    }
-    std::array<wchar_t, 40> buffer{};
-    if (StringFromGUID2(value, buffer.data(),
-                        static_cast<int>(buffer.size())) == 0) {
-        throw std::runtime_error("StringFromGUID2 failed");
-    }
-    std::wstring name(buffer.data());
-    name.erase(std::remove(name.begin(), name.end(), L'{'), name.end());
-    name.erase(std::remove(name.begin(), name.end(), L'}'), name.end());
-    return name;
+bool samePath(const std::filesystem::path& left,
+              const std::filesystem::path& right) {
+    const auto leftPath = std::filesystem::absolute(left).lexically_normal().wstring();
+    const auto rightPath =
+        std::filesystem::absolute(right).lexically_normal().wstring();
+    return CompareStringOrdinal(leftPath.c_str(), -1, rightPath.c_str(), -1,
+                               TRUE) == CSTR_EQUAL;
 }
 
-std::filesystem::path stageCurrentExecutable(
-    const std::filesystem::path& executable,
-    const std::filesystem::path& installRoot) {
-    const auto sourceAssets = executable.parent_path() / L"assets" / L"ui";
-    for (const wchar_t* name : {ShellImageName, DialImageName}) {
-        const auto image = sourceAssets / name;
-        if (!std::filesystem::is_regular_file(image)) {
-            throw std::runtime_error(
-                "Chronox image asset is missing beside the executable: " +
-                image.string());
-        }
+bool isInside(const std::filesystem::path& path,
+              const std::filesystem::path& root) {
+    auto normalizedPath =
+        std::filesystem::absolute(path).lexically_normal().wstring();
+    auto normalizedRoot =
+        std::filesystem::absolute(root).lexically_normal().wstring();
+    if (normalizedRoot.empty() || normalizedPath.size() <= normalizedRoot.size()) {
+        return false;
     }
-
-    std::filesystem::create_directories(installRoot);
-    const auto name = uniqueDeploymentName();
-    const auto stagingDirectory = installRoot / (name + L".staging");
-    const auto versionDirectory = installRoot / name;
-    std::filesystem::create_directory(stagingDirectory);
-    try {
-        std::filesystem::copy_file(
-            executable, stagingDirectory / executable.filename());
-        const auto stagedAssets =
-            stagingDirectory / L"assets" / L"ui";
-        std::filesystem::create_directories(stagedAssets);
-        for (const auto& entry :
-             std::filesystem::directory_iterator(sourceAssets)) {
-            std::filesystem::copy(
-                entry.path(), stagedAssets / entry.path().filename(),
-                std::filesystem::copy_options::recursive);
-        }
-
-        const auto stagedExecutable =
-            stagingDirectory / executable.filename();
-        if (!std::filesystem::is_regular_file(stagedExecutable) ||
-            !sameFileContents(executable, stagedExecutable) ||
-            !std::filesystem::is_regular_file(
-                stagedExecutable.parent_path() / L"assets" / L"ui" /
-                ShellImageName) ||
-            !std::filesystem::is_regular_file(
-                stagedExecutable.parent_path() / L"assets" / L"ui" /
-                DialImageName)) {
-            throw std::runtime_error(
-                "Chronox deployment is missing its executable or PNG assets");
-        }
-        if (!sameInstalledAssets(executable, stagedExecutable)) {
-            throw std::runtime_error(
-                "Chronox deployment did not copy the current PNG assets");
-        }
-        std::filesystem::rename(stagingDirectory, versionDirectory);
-    } catch (...) {
-        std::error_code cleanupError;
-        std::filesystem::remove_all(stagingDirectory, cleanupError);
-        if (cleanupError) {
-            throw std::runtime_error(
-                "Chronox deployment failed and its staging directory could not "
-                "be removed: " +
-                cleanupError.message());
-        }
-        throw;
+    if (normalizedRoot.back() != L'\\' && normalizedRoot.back() != L'/') {
+        normalizedRoot.push_back(L'\\');
     }
-    return versionDirectory / executable.filename();
+    return normalizedPath.size() > normalizedRoot.size() &&
+           CompareStringOrdinal(normalizedPath.data(),
+                              static_cast<int>(normalizedRoot.size()),
+                              normalizedRoot.data(),
+                              static_cast<int>(normalizedRoot.size()), TRUE) ==
+               CSTR_EQUAL;
 }
 
 } // namespace
@@ -410,20 +311,6 @@ StartupState WindowsStartup::state() const {
     }
 }
 
-std::filesystem::path WindowsStartup::deployCurrentVersion() const {
-    const auto currentCommand =
-        readRegistryString(runKeyPath(), RunValueName);
-    if (currentCommand.has_value()) {
-        const auto installedExecutable = parseRunExecutable(*currentCommand);
-        if (!installedExecutable.empty() &&
-            sameFileContents(paths_.executable, installedExecutable) &&
-            sameInstalledAssets(paths_.executable, installedExecutable)) {
-            return installedExecutable;
-        }
-    }
-    return stageCurrentExecutable(paths_.executable, paths_.installRoot);
-}
-
 void WindowsStartup::setEnabled(bool enabled) {
     if (!enabled) {
         deleteRegistryValue(runKeyPath(), RunValueName);
@@ -431,8 +318,14 @@ void WindowsStartup::setEnabled(bool enabled) {
         return;
     }
 
-    const auto installedExecutable = deployCurrentVersion();
-    writeRunCommand(runKeyPath(), installedExecutable);
+    const auto installed = stableExecutable(paths_);
+    if (!std::filesystem::is_regular_file(installed) ||
+        !hasRequiredAssets(installed)) {
+        throw std::runtime_error(
+            "La version stable de Chronox et ses PNG doivent être installés "
+            "avant d'activer le démarrage Windows");
+    }
+    writeRunCommand(runKeyPath(), installed);
     deleteRegistryValue(startupApprovedKeyPath(), RunValueName);
 }
 
@@ -442,19 +335,20 @@ bool WindowsStartup::synchronizeInstalledVersion() {
     if (!currentCommand.has_value()) {
         return false;
     }
-    const auto installedExecutable = parseRunExecutable(*currentCommand);
-    if (installedExecutable.empty()) {
+    const auto registeredExecutable = parseRunExecutable(*currentCommand);
+    if (registeredExecutable.empty()) {
         throw std::runtime_error(
             "Chronox startup registry command is not recognized");
     }
-    if (sameFileContents(paths_.executable, installedExecutable) &&
-        sameInstalledAssets(paths_.executable, installedExecutable)) {
+    const auto installed = stableExecutable(paths_);
+    if (samePath(registeredExecutable, installed) ||
+        !isInside(registeredExecutable, paths_.installRoot) ||
+        !samePath(registeredExecutable.filename(), paths_.executable.filename()) ||
+        !std::filesystem::is_regular_file(installed) ||
+        !hasRequiredAssets(installed)) {
         return false;
     }
-
-    const auto updatedExecutable =
-        stageCurrentExecutable(paths_.executable, paths_.installRoot);
-    writeRunCommand(runKeyPath(), updatedExecutable);
+    writeRunCommand(runKeyPath(), installed);
     return true;
 }
 
