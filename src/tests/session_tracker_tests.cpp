@@ -42,12 +42,29 @@ void lockAndUnlockAccumulateOnlyUnlockedTime() {
     require(tracker.elapsed(start + 13s) == 7s, "locked duration is excluded");
 }
 
+void currentSessionDurationResetsAfterLockAndResumesContinuously() {
+    const auto start = SessionTracker::TimePoint{};
+    SessionTracker tracker(false, start);
+    require(tracker.currentSessionElapsed(start + 4s) == 4s,
+            "current session measures its continuous active interval");
+    tracker.apply(SessionEvent::Locked, start + 4s);
+    require(tracker.currentSessionElapsed(start + 8s) == 0s,
+            "locking resets the current session duration");
+    require(tracker.elapsed(start + 8s) == 4s,
+            "locking preserves the accumulated engine duration");
+    tracker.apply(SessionEvent::Unlocked, start + 10s);
+    require(tracker.currentSessionElapsed(start + 13s) == 3s,
+            "unlock starts a fresh current session");
+}
+
 void sleepAndWakeAccumulateOnlyAwakeTime() {
     const auto start = SessionTracker::TimePoint{};
     SessionTracker tracker(false, start);
     require(tracker.apply(SessionEvent::Suspended, start + 3s), "suspend changes state");
     require(tracker.apply(SessionEvent::Resumed, start + 9s), "resume changes state");
     require(tracker.elapsed(start + 11s) == 5s, "sleep duration is excluded");
+    require(tracker.currentSessionElapsed(start + 11s) == 2s,
+            "wake starts a new current session after sleep");
 }
 
 void duplicateEventsAreIdempotent() {
@@ -111,12 +128,26 @@ void utcTimestampsReanchorAfterResumeAndDatabaseRestart() {
             "restart reanchors after the last persisted interval");
 }
 
+void currentSessionContinuesAcrossMidnightAndRestartsFresh() {
+    const auto start = SessionTracker::TimePoint{};
+    SessionTracker beforeMidnight(false, start);
+    require(beforeMidnight.currentSessionElapsed(start + 2h) == 2h,
+            "a running session retains its own elapsed time across midnight");
+
+    SessionTracker afterRestart(false, start + 3h);
+    require(afterRestart.currentSessionElapsed(start + 3h) == 0s,
+            "a process restart begins a new current session");
+    require(afterRestart.currentSessionElapsed(start + 3h + 5min) == 5min,
+            "the restarted current session counts from the new launch");
+}
+
 } // namespace
 
 int main() {
     startsImmediatelyWhenInitiallyUnlocked();
     lockedStartupWaitsForUnlock();
     lockAndUnlockAccumulateOnlyUnlockedTime();
+    currentSessionDurationResetsAfterLockAndResumesContinuously();
     sleepAndWakeAccumulateOnlyAwakeTime();
     duplicateEventsAreIdempotent();
     wakingWhileLockedDoesNotResumeCounting();
@@ -124,5 +155,6 @@ int main() {
     utcTimestampsKeepMicrosecondPrecision();
     utcTimestampsRemainMonotonicAcrossClockAdjustments();
     utcTimestampsReanchorAfterResumeAndDatabaseRestart();
+    currentSessionContinuesAcrossMidnightAndRestartsFresh();
     std::cout << "All session tracker tests passed.\n";
 }

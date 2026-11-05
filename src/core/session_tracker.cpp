@@ -44,6 +44,10 @@ SessionTracker::Duration SessionTracker::elapsed(TimePoint at) const {
     return accumulated_;
 }
 
+SessionTracker::Duration SessionTracker::currentSessionElapsed(TimePoint at) const {
+    return isCounting() ? at - countingSince_ : Duration{};
+}
+
 bool SessionTracker::isLocked() const noexcept {
     return locked_;
 }

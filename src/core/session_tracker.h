@@ -21,6 +21,7 @@ public:
 
     bool apply(SessionEvent event, TimePoint at);
     Duration elapsed(TimePoint at) const;
+    Duration currentSessionElapsed(TimePoint at) const;
     bool isLocked() const noexcept;
     bool isAwake() const noexcept;
     bool isCounting() const noexcept;
