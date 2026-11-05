@@ -74,36 +74,66 @@ foreach ($asset in $requiredAssets) {
 
 $installRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $env:LOCALAPPDATA 'Programs\Chronox'))
-$versionName = 'version-{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmssfff'),
-    ([guid]::NewGuid().ToString('N'))
-$versionDirectory = Join-Path $installRoot $versionName
-$stagingDirectory = Join-Path $installRoot ".$versionName.staging"
-if ((Test-Path -LiteralPath $versionDirectory) -or
-    (Test-Path -LiteralPath $stagingDirectory)) {
-    throw "Le chemin de version existe déjà ; aucun fichier modifié : $versionDirectory"
-}
+$stableExecutable = Join-Path $installRoot 'chronox.exe'
+$stableAssetsRoot = Join-Path $installRoot 'assets'
+$stableAssets = Join-Path $stableAssetsRoot 'ui'
+$token = [guid]::NewGuid().ToString('N')
+$stagingDirectory = Join-Path $installRoot ".$token.staging"
+$backupDirectory = Join-Path $installRoot ".$token.backup"
+$stagedAssets = Join-Path $stagingDirectory 'assets\ui'
 
-$previousVersions = @()
 if (Test-Path -LiteralPath $installRoot -PathType Container) {
     $installRootItem = Get-Item -LiteralPath $installRoot -Force
     if (($installRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "Le dossier d'installation est un lien ; installation refusée : $installRoot"
     }
-    $previousVersions = @(Get-ChildItem -LiteralPath $installRoot -Directory |
-        Where-Object { $_.Name -match '^version-\d{8}-\d{9}-[0-9a-f]{32}$' })
 }
-$processes = @(Get-Process -Name chronox -ErrorAction SilentlyContinue)
-if ($processes.Count -gt 0) {
-    Write-Host 'Chronox est déjà en cours ; la mise à jour versionnée ne l''arrêtera pas.'
-    foreach ($process in $processes) {
-        $processPath = if ($process.Path) { $process.Path } else { 'chemin inaccessible' }
-        Write-Host ("  PID {0} : {1}" -f $process.Id, $processPath)
+foreach ($candidate in @($stableExecutable, $stableAssets, $stableAssetsRoot)) {
+    if (Test-Path -LiteralPath $candidate) {
+        $candidateItem = Get-Item -LiteralPath $candidate -Force
+        if (($candidateItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Le chemin d'installation est un lien ; remplacement refusé : $candidate"
+        }
     }
 }
-if ($previousVersions.Count -gt 0) {
-    Write-Host ("Versions déjà installées : {0}" -f
-        (($previousVersions | ForEach-Object { $_.Name }) -join ', '))
-    Write-Host 'Elles sont conservées pour ne pas supprimer un exécutable encore utilisé.'
+if ((Test-Path -LiteralPath $stableExecutable) -and
+    -not (Test-Path -LiteralPath $stableExecutable -PathType Leaf)) {
+    throw "Le chemin de l'exécutable stable n'est pas un fichier ; remplacement refusé : $stableExecutable"
+}
+if ((Test-Path -LiteralPath $stableAssets) -and
+    -not (Test-Path -LiteralPath $stableAssets -PathType Container)) {
+    throw "Le chemin des ressources stables n'est pas un dossier ; remplacement refusé : $stableAssets"
+}
+
+$processes = @(Get-Process -Name chronox -ErrorAction SilentlyContinue)
+foreach ($process in $processes) {
+    if (-not $process.Path) {
+        throw "Le chemin du processus Chronox (PID $($process.Id)) est inaccessible ; installation annulée sans arrêter le processus."
+    }
+    if ([string]::Equals(
+            [System.IO.Path]::GetFullPath($process.Path),
+            [System.IO.Path]::GetFullPath($stableExecutable),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Chronox utilise l'exécutable stable (PID $($process.Id)). Fermez-le proprement puis relancez le script ; aucun processus ne sera arrêté automatiquement."
+    }
+}
+if ($processes.Count -gt 0) {
+    Write-Host 'Chronox fonctionne depuis une ancienne copie ; elle reste active pendant la préparation de la version stable.'
+    foreach ($process in $processes) {
+        Write-Host ("  PID {0} : {1}" -f $process.Id, $process.Path)
+    }
+}
+
+$legacyExecutables = @()
+if (Test-Path -LiteralPath $installRoot -PathType Container) {
+    $legacyExecutables = @(Get-ChildItem -LiteralPath $installRoot -Directory -Force |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'chronox.exe') })
+}
+if ($legacyExecutables.Count -gt 0) {
+    Write-Host 'Copies historiques détectées ; elles ne seront ni écrasées ni supprimées :'
+    foreach ($legacy in $legacyExecutables) {
+        Write-Host "  $($legacy.FullName)"
+    }
 }
 
 $runKeyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -123,11 +153,14 @@ if ($null -ne $runEntry) {
         $registeredExecutable = [System.IO.Path]::GetFullPath($Matches.Executable)
         $installPrefix = $installRoot.TrimEnd('\') + '\'
         if ($Matches.Arguments.Trim() -eq $startupArguments -and
+            [string]::Equals(
+                [System.IO.Path]::GetFileName($registeredExecutable),
+                'chronox.exe', [System.StringComparison]::OrdinalIgnoreCase) -and
             $registeredExecutable.StartsWith(
                 $installPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             $updateRunEntry = $true
         } else {
-            Write-Warning 'L''entrée HKCU Run Chronox ne correspond pas à une installation versionnée ; elle sera conservée.'
+            Write-Warning 'L''entrée HKCU Run Chronox ne correspond pas à une ancienne installation Chronox ; elle sera conservée.'
         }
     } else {
         Write-Warning 'L''entrée HKCU Run Chronox a un format inattendu ; elle sera conservée.'
@@ -135,20 +168,22 @@ if ($null -ne $runEntry) {
 }
 
 if (-not $PSCmdlet.ShouldProcess(
-        $versionDirectory, 'Installer Chronox dans un nouveau dossier versionné')) {
+        $stableExecutable, 'Installer ou mettre à jour Chronox à son chemin stable')) {
     return
 }
 
-$installed = $false
-$runEntryChanged = $false
 $stagedHash = $null
+$oldExecutableMoved = $false
+$oldAssetsMoved = $false
+$newAssetsMoved = $false
+$newExecutableMoved = $false
+$runEntryChanged = $false
 try {
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
+    New-Item -ItemType Directory -Path $stagedAssets -Force | Out-Null
     Copy-Item -LiteralPath $sourceExecutable `
         -Destination (Join-Path $stagingDirectory 'chronox.exe')
-    $stagedAssets = Join-Path $stagingDirectory 'assets\ui'
-    New-Item -ItemType Directory -Path $stagedAssets -Force | Out-Null
     Get-ChildItem -LiteralPath $sourceAssets -Force |
         Copy-Item -Destination $stagedAssets -Recurse
 
@@ -170,52 +205,106 @@ try {
         throw 'La vérification SHA-256 de chronox.exe a échoué.'
     }
 
-    Move-Item -LiteralPath $stagingDirectory -Destination $versionDirectory
-    $installed = $true
+    New-Item -ItemType Directory -Path $backupDirectory | Out-Null
+    if (Test-Path -LiteralPath $stableExecutable -PathType Leaf) {
+        Move-Item -LiteralPath $stableExecutable `
+            -Destination (Join-Path $backupDirectory 'chronox.exe')
+        $oldExecutableMoved = $true
+    }
+    if (Test-Path -LiteralPath $stableAssets -PathType Container) {
+        $backupAssets = Join-Path $backupDirectory 'assets'
+        New-Item -ItemType Directory -Path $backupAssets | Out-Null
+        Move-Item -LiteralPath $stableAssets `
+            -Destination (Join-Path $backupAssets 'ui')
+        $oldAssetsMoved = $true
+    }
 
     if ($updateRunEntry) {
         $runEntryChanged = $true
         Set-ItemProperty -LiteralPath $runKeyPath -Name Chronox `
-            -Value ('"{0}" {1}' -f (Join-Path $versionDirectory 'chronox.exe'),
-                $startupArguments)
+            -Value ('"{0}" {1}' -f $stableExecutable, $startupArguments)
     }
+
+    New-Item -ItemType Directory -Path $stableAssetsRoot -Force | Out-Null
+    Move-Item -LiteralPath $stagedAssets -Destination $stableAssets
+    $newAssetsMoved = $true
+    Move-Item -LiteralPath $stagedExecutable -Destination $stableExecutable
+    $newExecutableMoved = $true
 } catch {
     $installationError = $_
+    $rollbackErrors = @()
     if ($runEntryChanged -and $null -ne $oldRunCommand) {
         try {
             Set-ItemProperty -LiteralPath $runKeyPath -Name Chronox -Value $oldRunCommand
         } catch {
-            Write-Warning "Restauration de l'entrée de démarrage impossible : $($_.Exception.Message)"
+            $rollbackErrors += "Restauration de HKCU Run impossible : $($_.Exception.Message)"
         }
     }
-    foreach ($candidate in @($stagingDirectory, $versionDirectory)) {
+    if ($newExecutableMoved -and (Test-Path -LiteralPath $stableExecutable -PathType Leaf)) {
+        try { Remove-Item -LiteralPath $stableExecutable -Force } catch {
+            $rollbackErrors += "Retrait du nouvel exécutable impossible : $($_.Exception.Message)"
+        }
+    }
+    if ($newAssetsMoved -and (Test-Path -LiteralPath $stableAssets -PathType Container)) {
+        try { Remove-Item -LiteralPath $stableAssets -Recurse -Force } catch {
+            $rollbackErrors += "Retrait des nouvelles ressources impossible : $($_.Exception.Message)"
+        }
+    }
+    if ($oldAssetsMoved -and (Test-Path -LiteralPath (Join-Path $backupDirectory 'assets\ui'))) {
+        try {
+            New-Item -ItemType Directory -Path $stableAssetsRoot -Force | Out-Null
+            Move-Item -LiteralPath (Join-Path $backupDirectory 'assets\ui') `
+                -Destination $stableAssets
+        } catch {
+            $rollbackErrors += "Restauration des anciennes ressources impossible : $($_.Exception.Message)"
+        }
+    }
+    if ($oldExecutableMoved -and
+        (Test-Path -LiteralPath (Join-Path $backupDirectory 'chronox.exe') -PathType Leaf)) {
+        try {
+            Move-Item -LiteralPath (Join-Path $backupDirectory 'chronox.exe') `
+                -Destination $stableExecutable
+        } catch {
+            $rollbackErrors += "Restauration de l'ancien exécutable impossible : $($_.Exception.Message)"
+        }
+    }
+    if ($rollbackErrors.Count -gt 0) {
+        throw ("Échec d'installation : {0}`n{1}`nLa sauvegarde est conservée dans : {2}" -f
+            $installationError.Exception.Message, ($rollbackErrors -join "`n"), $backupDirectory)
+    }
+    foreach ($candidate in @($stagingDirectory, $backupDirectory)) {
         if (Test-Path -LiteralPath $candidate -PathType Container) {
-            $fullCandidate = [System.IO.Path]::GetFullPath($candidate)
-            if ($fullCandidate -eq $stagingDirectory -or
-                ($installed -and $fullCandidate -eq $versionDirectory)) {
-                Remove-Item -LiteralPath $fullCandidate -Recurse -Force
-            }
+            Remove-Item -LiteralPath $candidate -Recurse -Force
         }
     }
     throw $installationError
 }
 
-$installedExecutable = Join-Path $versionDirectory 'chronox.exe'
-Write-Host "Installation réussie : $installedExecutable"
+foreach ($candidate in @($stagingDirectory, $backupDirectory)) {
+    if (Test-Path -LiteralPath $candidate -PathType Container) {
+        try {
+            Remove-Item -LiteralPath $candidate -Recurse -Force
+        } catch {
+            Write-Warning "Suppression du dossier temporaire impossible ; il est conservé : $candidate"
+        }
+    }
+}
+
+Write-Host "Installation stable réussie : $stableExecutable"
 Write-Host "SHA-256 : $stagedHash"
 if ($updateRunEntry) {
-    Write-Host 'Chemin HKCU Run Chronox mis à jour ; l''état StartupApproved de Windows reste inchangé.'
+    Write-Host 'HKCU Run Chronox pointe maintenant vers la version stable ; l''état StartupApproved de Windows reste inchangé.'
 } else {
     Write-Host 'Le démarrage Windows n''a pas été activé ni modifié.'
 }
-Write-Host 'La base SQLite, ses sauvegardes et les préférences utilisateur n''ont pas été modifiées.'
+Write-Host 'Les copies historiques, SQLite, les sauvegardes et les préférences utilisateur sont préservées.'
 
 if ($Launch) {
     if ($processes.Count -gt 0) {
         Write-Warning 'Lancement ignoré : Chronox fonctionne déjà. Aucune instance n''a été arrêtée.'
-    } elseif ($PSCmdlet.ShouldProcess($installedExecutable, 'Lancer Chronox après installation')) {
-        $process = Start-Process -FilePath $installedExecutable `
-            -WorkingDirectory $versionDirectory -PassThru
+    } elseif ($PSCmdlet.ShouldProcess($stableExecutable, 'Lancer Chronox après installation')) {
+        $process = Start-Process -FilePath $stableExecutable `
+            -WorkingDirectory $installRoot -PassThru
         Start-Sleep -Seconds 2
         $process.Refresh()
         if ($process.HasExited) {

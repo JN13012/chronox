@@ -18,7 +18,7 @@ if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
     throw "Le dossier d'installation est un lien ; refus de le parcourir : $installRoot"
 }
 
-$versionPattern = '^version-\d{8}-\d{9}-[0-9a-f]{32}$'
+$versionPattern = '^(version-\d{8}-\d{9}-[0-9a-f]{32}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})$'
 $versions = @(Get-ChildItem -LiteralPath $installRoot -Directory -Force |
     Where-Object {
         $_.Name -match $versionPattern -and
@@ -45,6 +45,26 @@ foreach ($version in $versions) {
     }
 }
 
+$stableExecutable = Join-Path $installRoot 'chronox.exe'
+$stableAssets = Join-Path $installRoot 'assets\ui'
+foreach ($candidate in @($stableExecutable, $stableAssets)) {
+    if (Test-Path -LiteralPath $candidate) {
+        $candidateItem = Get-Item -LiteralPath $candidate -Force
+        if (($candidateItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Le chemin stable est un lien ; suppression refusée : $candidate"
+        }
+    }
+}
+if (Test-Path -LiteralPath $stableAssets -PathType Container) {
+    $stableReparsePoints = @(Get-ChildItem -LiteralPath $stableAssets -Force -Recurse |
+        Where-Object {
+            ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+        })
+    if ($stableReparsePoints.Count -gt 0) {
+        throw "Un lien existe dans les ressources ; suppression récursive refusée : $stableAssets"
+    }
+}
+
 $runKeyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runEntry = $null
 if (Test-Path -LiteralPath $runKeyPath) {
@@ -60,6 +80,9 @@ if ($null -ne $runEntry) {
         $registeredExecutable = [System.IO.Path]::GetFullPath($Matches.Executable)
         $installPrefix = $installRoot.TrimEnd('\') + '\'
         if ($Matches.Arguments.Trim() -eq '--startup' -and
+            [string]::Equals(
+                [System.IO.Path]::GetFileName($registeredExecutable),
+                'chronox.exe', [System.StringComparison]::OrdinalIgnoreCase) -and
             $registeredExecutable.StartsWith(
                 $installPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             $removeRunEntry = $true
@@ -83,6 +106,7 @@ $installPrefix = $installRoot.TrimEnd('\') + '\'
 $installedExecutables = @($versions | ForEach-Object {
     [System.IO.Path]::GetFullPath((Join-Path $_.FullName 'chronox.exe'))
 })
+$installedExecutables += [System.IO.Path]::GetFullPath($stableExecutable)
 $installedProcesses = @($allProcesses | Where-Object {
     $_.Path -and $installedExecutables -contains
         [System.IO.Path]::GetFullPath($_.Path)
@@ -187,6 +211,14 @@ if ($PSCmdlet.ShouldProcess(
         Remove-Item -LiteralPath $candidate -Recurse -Force
         Write-Host "Version supprimée : $($version.Name)"
     }
+    if (Test-Path -LiteralPath $stableExecutable -PathType Leaf) {
+        Remove-Item -LiteralPath $stableExecutable -Force
+        Write-Host "Exécutable stable supprimé : $stableExecutable"
+    }
+    if (Test-Path -LiteralPath $stableAssets -PathType Container) {
+        Remove-Item -LiteralPath $stableAssets -Recurse -Force
+        Write-Host "Ressources installées supprimées : $stableAssets"
+    }
 } elseif ($WhatIfPreference) {
     if ($removeRunEntry) {
         Write-Host 'Suppression prévisualisée : HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Chronox'
@@ -194,6 +226,12 @@ if ($PSCmdlet.ShouldProcess(
     foreach ($version in $versions) {
         Write-Host ("Suppression prévisualisée : {0}" -f
             [System.IO.Path]::GetFullPath($version.FullName))
+    }
+    if (Test-Path -LiteralPath $stableExecutable -PathType Leaf) {
+        Write-Host "Suppression prévisualisée : $stableExecutable"
+    }
+    if (Test-Path -LiteralPath $stableAssets -PathType Container) {
+        Write-Host "Suppression prévisualisée : $stableAssets"
     }
 } else {
     Write-Host 'Désinstallation annulée ; les fichiers et l''entrée de démarrage sont conservés.'

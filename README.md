@@ -70,41 +70,52 @@ d’une perte correspondant au temps écoulé depuis le dernier point de sauvega
 À l’ouverture, SQLite vérifie l’intégrité ; une base corrompue est signalée et
 n’est pas réparée ni remplacée automatiquement. L’API de stockage fournit une
 sauvegarde cohérente par SQLite vers un nouveau fichier, sans planification
-automatique. Une seule instance peut suivre la session Windows à la fois. Les
-changements d’heure sont pris en compte dans les limites calendaires locales.
+automatique. Une seule instance peut suivre la session Windows à la fois. Le
+widget, le dashboard et SQLite partagent ce processus et ce moteur. Fermer le
+dashboard ou masquer le widget ne ferme pas Chronox ; seule la commande
+« Quitter Chronox » arrête le suivi. L’icône officielle de Chronox reste dans la
+zone de notification ; un clic simple affiche/masque le widget, un double-clic
+ouvre le dashboard et le clic droit ouvre le menu. L’icône est réenregistrée
+si l’Explorateur Windows redémarre. Les changements d’heure sont pris en compte
+dans les limites calendaires locales.
 
 Le menu de l’icône de notification permet d’activer explicitement le démarrage
 avec Windows. L’option utilise HKCU sans élévation et reste désactivée par
-défaut. Lorsque l’option est active, une nouvelle version est copiée dans un
-sous-dossier versionné de `%LOCALAPPDATA%\Programs\Chronox` avant la mise à jour
-de l’entrée de démarrage ; les fichiers d’une version en cours ne sont pas
-écrasés. Les ressources PNG sont vérifiées avant l’activation. Les mises à jour
-ne réactivent pas un démarrage désactivé depuis Windows. Les anciens dossiers
-de version ne sont pas supprimés automatiquement pour éviter d’effacer un
-exécutable encore utilisé.
+défaut. Elle référence l’installation stable
+`%LOCALAPPDATA%\Programs\Chronox\chronox.exe` et refuse l’activation si
+l’exécutable ou ses PNG ne sont pas installés. Les mises à jour ne réactivent
+pas un démarrage désactivé depuis Windows. Les anciennes copies ne sont pas
+supprimées automatiquement.
 
 Après une compilation Release, le script facultatif
-`scripts\install-local.ps1` installe l'exécutable et ses PNG dans un nouveau
-sous-dossier versionné de `%LOCALAPPDATA%\Programs\Chronox`. Il ne ferme pas
-Chronox, n'écrase aucune version en cours, ne touche ni à la base ni aux
-préférences et ne crée jamais une entrée de démarrage. Il ne met à jour le
-chemin HKCU Run que si une inscription Chronox existante pointe déjà vers une
-version installée. Après avoir quitté Chronox manuellement pour tester une
-nouvelle version, lancer `.\scripts\install-local.ps1 -Launch` ; sans cette
-option, le script se limite à l'installation. Pour compiler en Release puis
-installer en une commande, utiliser `.\scripts\install-local.ps1 -Build`.
-L'option `-Launch` demande également un lancement après installation ; si
-Chronox fonctionne déjà, ce lancement est ignoré plutôt que de créer une
-seconde instance. Les anciennes versions restent disponibles pour un retour
-arrière manuel.
+`scripts\install-local.ps1` installe l’exécutable et ses PNG au chemin stable
+`%LOCALAPPDATA%\Programs\Chronox\chronox.exe`. Le remplacement est préparé à
+côté de la cible, vérifié par SHA-256, puis effectué avec sauvegarde et retour
+arrière en cas d’échec. Le script ne ferme jamais Chronox : il refuse de
+remplacer un binaire stable en cours d’utilisation et laisse tourner une
+ancienne copie. Il ne touche ni à la base ni aux préférences et ne crée jamais
+une entrée de démarrage. Il met à jour HKCU Run uniquement si une inscription
+Chronox existante pointait déjà vers une ancienne installation connue. Les
+anciennes copies restent disponibles jusqu’à leur suppression manuelle
+confirmée.
+
+Après l’installation, fermez proprement une éventuelle ancienne instance avant
+de tester le nouveau binaire. Pour compiler en Release puis installer en une
+commande, utiliser `.\scripts\install-local.ps1 -Build`. Pour proposer le
+lancement après l’installation, ajouter `-Launch` ; si Chronox fonctionne déjà,
+le lancement est ignoré plutôt que de créer une seconde instance. Les
+exécutables CTest sont des cibles séparées et ne sont jamais installés. Pour
+garder l’icône toujours visible, ouvrir Paramètres Windows > Personnalisation
+> Barre des tâches > Autres icônes de la barre d’état système et activer
+Chronox.
 
 Les scripts fonctionnent sous Windows PowerShell 5.1 et PowerShell 7 :
 
 ```powershell
-# Compiler si nécessaire, puis installer sans fermer Chronox
+# Compiler si nécessaire, puis installer au chemin stable sans fermer Chronox
 .\scripts\install-local.ps1 -Build
 
-# Installer puis lancer explicitement (Chronox doit être arrêté)
+# Installer puis proposer le lancement (une ancienne instance peut rester active)
 .\scripts\install-local.ps1 -Launch
 
 # Prévisualiser ou confirmer la désinstallation de l’application uniquement
