@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cwchar>
 #include <stdexcept>
 #include <string>
@@ -26,6 +27,8 @@ constexpr float SidebarCompactWidth = 72.0f;
 constexpr float CompactLayoutThreshold = 820.0f;
 constexpr float InitialClientWidth = 1050.0f;
 constexpr float InitialClientHeight = 700.0f;
+constexpr UINT_PTR DashboardRefreshTimerId = 1;
+constexpr UINT DashboardRefreshIntervalMs = 15'000;
 
 enum class DashboardPage {
     Overview,
@@ -58,11 +61,96 @@ D2D1_COLOR_F color(BYTE red, BYTE green, BYTE blue) {
     return D2D1::ColorF(red / 255.0f, green / 255.0f, blue / 255.0f);
 }
 
+std::wstring formatDuration(std::chrono::seconds duration) {
+    const auto totalMinutes =
+        std::chrono::duration_cast<std::chrono::minutes>(duration).count();
+    const auto hours = totalMinutes / 60;
+    const auto minutes = totalMinutes % 60;
+    return std::to_wstring(hours) + L" h " +
+           (minutes < 10 ? L"0" : L"") + std::to_wstring(minutes) + L" min";
+}
+
+std::wstring formatLocalTimestamp(Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    std::tm local{};
+    if (localtime_s(&local, &value) != 0) {
+        throw std::runtime_error("Could not format a dashboard session time");
+    }
+    wchar_t text[48]{};
+    if (wcsftime(text, std::size(text), L"%d/%m %H:%M", &local) == 0) {
+        throw std::runtime_error("Could not format a dashboard session time");
+    }
+    return text;
+}
+
+std::wstring formatMonthYear(Timestamp timestamp) {
+    constexpr std::array<const wchar_t*, 12> months{
+        L"Janvier", L"F\u00e9vrier", L"Mars", L"Avril", L"Mai", L"Juin",
+        L"Juillet", L"Ao\u00fbt", L"Septembre", L"Octobre", L"Novembre",
+        L"D\u00e9cembre"};
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    std::tm local{};
+    if (localtime_s(&local, &value) != 0 || local.tm_mon < 0 ||
+        local.tm_mon >= static_cast<int>(months.size())) {
+        throw std::runtime_error("Could not format the dashboard month");
+    }
+    return std::wstring(months[static_cast<std::size_t>(local.tm_mon)]) + L" " +
+           std::to_wstring(local.tm_year + 1900);
+}
+
+std::wstring formatYear(Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    std::tm local{};
+    if (localtime_s(&local, &value) != 0) {
+        throw std::runtime_error("Could not format the dashboard year");
+    }
+    return L"Ann\u00e9e " + std::to_wstring(local.tm_year + 1900);
+}
+
+Timestamp localDayHourBoundary(Timestamp dayStart, int hour) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(dayStart));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    std::tm local{};
+    if (localtime_s(&local, &value) != 0) {
+        throw std::runtime_error("Could not read the dashboard day boundary");
+    }
+    if (hour == 24) {
+        ++local.tm_mday;
+        local.tm_hour = 0;
+    } else {
+        local.tm_hour = hour;
+    }
+    local.tm_min = 0;
+    local.tm_sec = 0;
+    local.tm_isdst = -1;
+    const auto boundary = std::mktime(&local);
+    if (boundary == static_cast<std::time_t>(-1)) {
+        throw std::runtime_error(
+            "Could not calculate dashboard day boundary for local date " +
+            std::to_string(local.tm_year + 1900) + "-" +
+            std::to_string(local.tm_mon + 1) + "-" +
+            std::to_string(local.tm_mday) + " at hour " +
+            std::to_string(hour) + " (timestamp " +
+            std::to_string(dayStart) + ")");
+    }
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::seconds(boundary))
+        .count();
+}
+
 } // namespace
 
 struct DashboardWindow::Impl {
-    explicit Impl(ErrorHandler errorHandlerValue)
-        : errorHandler(errorHandlerValue) {}
+    Impl(ErrorHandler errorHandlerValue, SnapshotProvider snapshotProviderValue)
+        : errorHandler(std::move(errorHandlerValue)),
+          snapshotProvider(std::move(snapshotProviderValue)) {}
 
     ~Impl() {
         if (window != nullptr && IsWindow(window)) {
@@ -76,6 +164,8 @@ struct DashboardWindow::Impl {
     }
 
     ErrorHandler errorHandler{};
+    SnapshotProvider snapshotProvider{};
+    DashboardSnapshot snapshot{};
     HWND window{};
     bool windowClassRegistered{};
     UINT dpi{96};
@@ -106,6 +196,7 @@ struct DashboardWindow::Impl {
         if (window == nullptr) {
             create();
         }
+        refreshSnapshot();
         if (IsIconic(window)) {
             ShowWindow(window, SW_RESTORE);
         } else {
@@ -113,6 +204,21 @@ struct DashboardWindow::Impl {
         }
         SetForegroundWindow(window);
         SetFocus(window);
+        if (SetTimer(window, DashboardRefreshTimerId,
+                     DashboardRefreshIntervalMs, nullptr) == 0) {
+            throw windowsError("SetTimer(dashboard refresh)", GetLastError());
+        }
+        render();
+    }
+
+    void refresh() {
+        if (window != nullptr && IsWindowVisible(window)) {
+            refreshSnapshot();
+        }
+    }
+
+    void refreshSnapshot() {
+        snapshot = snapshotProvider();
         render();
     }
 
@@ -317,6 +423,266 @@ struct DashboardWindow::Impl {
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
+    void drawCard(D2D1_RECT_F bounds) {
+        const auto card = D2D1::RoundedRect(bounds, 10.0f, 10.0f);
+        renderTarget->FillRoundedRectangle(card, panelHoverBrush.Get());
+        renderTarget->DrawRoundedRectangle(card, borderBrush.Get(), 0.8f);
+    }
+
+    void drawOverview(float left, float right, float top, float bottom) {
+        if (right <= left || bottom <= top) {
+            return;
+        }
+        const float width = right - left;
+        constexpr float gap = 9.0f;
+        const float statusY = top + 1.0f;
+        const auto statusColor =
+            snapshot.trackingActive ? cyanBrush.Get() : mutedBrush.Get();
+        renderTarget->FillEllipse(D2D1::Ellipse(
+                                     D2D1::Point2F(left + 6.0f, statusY + 8.0f),
+                                     4.0f, 4.0f),
+                                 statusColor);
+        drawText(snapshot.trackingActive ? L"SUIVI ACTIF" : L"SUIVI INACTIF",
+                 compactNavFormat.Get(), statusColor,
+                 D2D1::RectF(left + 18.0f, statusY, right, statusY + 18.0f));
+
+        const std::wstring monthLabel = formatMonthYear(snapshot.capturedAt);
+        const std::wstring yearLabel = formatYear(snapshot.capturedAt);
+        constexpr std::array<const wchar_t*, 2> fixedMetricLabels{
+            L"Aujourd'hui", L"Cette semaine"};
+        const std::array<std::chrono::seconds, 4> metricValues{
+            snapshot.todayDuration, snapshot.weekDuration, snapshot.monthDuration,
+            snapshot.yearDuration};
+        const float metricsTop = top + 24.0f;
+        const float metricsHeight = 66.0f;
+        const float metricWidth = (width - gap * 3.0f) / 4.0f;
+        for (std::size_t index = 0; index < metricValues.size(); ++index) {
+            const float cardLeft =
+                left + static_cast<float>(index) * (metricWidth + gap);
+            drawCard(D2D1::RectF(cardLeft, metricsTop, cardLeft + metricWidth,
+                                 metricsTop + metricsHeight));
+            const std::wstring dynamicLabel =
+                index == 2 ? monthLabel : (index == 3 ? yearLabel : L"");
+            const wchar_t* metricLabel =
+                index < fixedMetricLabels.size()
+                    ? fixedMetricLabels[index]
+                    : dynamicLabel.c_str();
+            drawText(metricLabel, compactNavFormat.Get(),
+                     mutedBrush.Get(),
+                     D2D1::RectF(cardLeft + 10.0f, metricsTop + 8.0f,
+                                 cardLeft + metricWidth - 8.0f,
+                                 metricsTop + 25.0f));
+            const std::wstring value = formatDuration(metricValues[index]);
+            drawText(value.c_str(), pageFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(cardLeft + 10.0f, metricsTop + 30.0f,
+                                 cardLeft + metricWidth - 7.0f,
+                                 metricsTop + metricsHeight - 4.0f));
+        }
+
+        const float chartsTop = metricsTop + metricsHeight + 9.0f;
+        constexpr float minimumSessionsHeight = 106.0f;
+        const float chartsHeight =
+            std::max(92.0f,
+                     std::min(154.0f,
+                              bottom - chartsTop - minimumSessionsHeight - 9.0f));
+        const float sessionsTop = chartsTop + chartsHeight + 9.0f;
+        const float chartWidth = (width - gap) / 2.0f;
+        const D2D1_RECT_F timelineCard =
+            D2D1::RectF(left, chartsTop, left + chartWidth,
+                        chartsTop + chartsHeight);
+        const D2D1_RECT_F weekCard =
+            D2D1::RectF(left + chartWidth + gap, chartsTop, right,
+                        chartsTop + chartsHeight);
+        drawCard(timelineCard);
+        drawCard(weekCard);
+        drawTimeline(timelineCard);
+        drawWeekChart(weekCard);
+
+        const D2D1_RECT_F sessionsCard =
+            D2D1::RectF(left, sessionsTop, right, bottom);
+        drawCard(sessionsCard);
+        drawRecentSessions(sessionsCard);
+    }
+
+    void drawTimeline(D2D1_RECT_F bounds) {
+        drawText(L"FRISE DU JOUR", compactNavFormat.Get(), cyanBrush.Get(),
+                 D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
+                             bounds.right - 10.0f, bounds.top + 25.0f));
+        const float left = bounds.left + 13.0f;
+        const float right = bounds.right - 13.0f;
+        const float trackTop = bounds.top + 43.0f;
+        const float trackBottom = trackTop + 18.0f;
+        const auto track =
+            D2D1::RoundedRect(D2D1::RectF(left, trackTop, right, trackBottom),
+                              4.0f, 4.0f);
+        renderTarget->FillRoundedRectangle(track, panelBrush.Get());
+        const auto dayDuration = snapshot.todayRange.end - snapshot.todayRange.start;
+        if (dayDuration <= 0) {
+            throw std::runtime_error("Dashboard received invalid local day bounds");
+        }
+        for (const auto& interval : snapshot.todayIntervals) {
+            const Timestamp start =
+                std::max(interval.start, snapshot.todayRange.start);
+            const Timestamp end = std::min(
+                interval.end, std::min(snapshot.capturedAt,
+                                       snapshot.todayRange.end));
+            if (end <= start) {
+                continue;
+            }
+            const float startRatio = static_cast<float>(
+                static_cast<double>(start - snapshot.todayRange.start) /
+                static_cast<double>(dayDuration));
+            const float endRatio = static_cast<float>(
+                static_cast<double>(end - snapshot.todayRange.start) /
+                static_cast<double>(dayDuration));
+            const float segmentLeft = left + (right - left) * startRatio;
+            const float segmentRight = std::min(
+                right, std::max(segmentLeft + 2.0f,
+                                left + (right - left) * endRatio));
+            if (segmentRight <= segmentLeft) {
+                continue;
+            }
+            renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(segmentLeft, trackTop, segmentRight, trackBottom),
+                    3.0f, 3.0f),
+                accentBrush.Get());
+        }
+        constexpr std::array<const wchar_t*, 5> labels{
+            L"00", L"06", L"12", L"18", L"24"};
+        for (std::size_t index = 0; index < labels.size(); ++index) {
+            const Timestamp boundary = localDayHourBoundary(
+                snapshot.todayRange.start, static_cast<int>(index) * 6);
+            const float ratio = static_cast<float>(
+                static_cast<double>(boundary - snapshot.todayRange.start) /
+                static_cast<double>(dayDuration));
+            const float x = left + (right - left) * ratio;
+            renderTarget->DrawLine(D2D1::Point2F(x, trackBottom + 2.0f),
+                                   D2D1::Point2F(x, trackBottom + 6.0f),
+                                   mutedBrush.Get(), 0.8f);
+            const float labelLeft =
+                index == labels.size() - 1 ? x - 17.0f : x - 5.0f;
+            drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(labelLeft, trackBottom + 6.0f, labelLeft + 24.0f,
+                                 bounds.bottom - 3.0f));
+        }
+        if (snapshot.todayIntervals.empty()) {
+            drawText(L"Aucune p\u00e9riode comptabilis\u00e9e", compactNavFormat.Get(),
+                     mutedBrush.Get(),
+                     D2D1::RectF(left, bounds.top + 28.0f, right,
+                                 bounds.top + 42.0f));
+        }
+    }
+
+    void drawWeekChart(D2D1_RECT_F bounds) {
+        drawText(L"HEURES · LUNDI AU DIMANCHE", compactNavFormat.Get(),
+                 cyanBrush.Get(),
+                 D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
+                             bounds.right - 8.0f, bounds.top + 25.0f));
+        constexpr std::array<const wchar_t*, 7> labels{
+            L"Lun", L"Mar", L"Mer", L"Jeu", L"Ven", L"Sam", L"Dim"};
+        const float chartLeft = bounds.left + 12.0f;
+        const float chartRight = bounds.right - 12.0f;
+        const float chartTop = bounds.top + 34.0f;
+        const float chartBottom = bounds.bottom - 23.0f;
+        const float chartHeight = std::max(8.0f, chartBottom - chartTop);
+        const float slotWidth = (chartRight - chartLeft) / 7.0f;
+        const auto maximum = std::max_element(
+            snapshot.weekDays.begin(), snapshot.weekDays.end(),
+            [](auto first, auto second) { return first < second; });
+        const double maxSeconds =
+            maximum == snapshot.weekDays.end() || maximum->count() <= 0
+                ? 1.0
+                : static_cast<double>(maximum->count());
+        for (std::size_t index = 0; index < snapshot.weekDays.size(); ++index) {
+            const float center =
+                chartLeft + slotWidth * (static_cast<float>(index) + 0.5f);
+            const float barWidth = std::min(18.0f, slotWidth * 0.52f);
+            const float barLeft = center - barWidth / 2.0f;
+            renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(barLeft, chartTop, barLeft + barWidth, chartBottom),
+                    4.0f, 4.0f),
+                panelBrush.Get());
+            const float valueHeight = static_cast<float>(
+                static_cast<double>(snapshot.weekDays[index].count()) /
+                maxSeconds * chartHeight);
+            if (valueHeight > 0.0f) {
+                renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(barLeft, chartBottom - valueHeight,
+                                    barLeft + barWidth, chartBottom),
+                        4.0f, 4.0f),
+                    index == 6 ? cyanBrush.Get() : accentBrush.Get());
+            }
+            drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(center - slotWidth / 2.0f, chartBottom + 3.0f,
+                                 center + slotWidth / 2.0f, bounds.bottom - 2.0f));
+        }
+    }
+
+    void drawRecentSessions(D2D1_RECT_F bounds) {
+        drawText(L"DERNI\u00c8RES SESSIONS", compactNavFormat.Get(),
+                 cyanBrush.Get(),
+                 D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
+                             bounds.right - 10.0f, bounds.top + 24.0f));
+        if (bounds.bottom - bounds.top < 78.0f) {
+            return;
+        }
+        const float headerTop = bounds.top + 30.0f;
+        renderTarget->DrawLine(D2D1::Point2F(bounds.left + 12.0f, headerTop + 16.0f),
+                               D2D1::Point2F(bounds.right - 12.0f, headerTop + 16.0f),
+                               borderBrush.Get(), 0.8f);
+        const float width = bounds.right - bounds.left - 24.0f;
+        const float startColumn = bounds.left + 12.0f;
+        const float endColumn = startColumn + width * 0.38f;
+        const float durationColumn = startColumn + width * 0.76f;
+        drawText(L"D\u00c9BUT", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(startColumn, headerTop, endColumn - 4.0f,
+                             headerTop + 15.0f));
+        drawText(L"FIN", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(endColumn, headerTop, durationColumn - 4.0f,
+                             headerTop + 15.0f));
+        drawText(L"DUR\u00c9E", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(durationColumn, headerTop, bounds.right - 10.0f,
+                             headerTop + 15.0f));
+
+        const float rowsTop = headerTop + 22.0f;
+        const float availableHeight = bounds.bottom - rowsTop - 6.0f;
+        const std::size_t rowLimit = availableHeight > 0.0f
+                                         ? static_cast<std::size_t>(
+                                               availableHeight / 21.0f)
+                                         : 0;
+        const std::size_t rowCount =
+            std::min(rowLimit, snapshot.recentSessions.size());
+        if (rowCount == 0) {
+            drawText(L"Aucune session r\u00e9cente", compactNavFormat.Get(),
+                     mutedBrush.Get(),
+                     D2D1::RectF(startColumn, rowsTop, bounds.right - 12.0f,
+                                 bounds.bottom - 3.0f));
+            return;
+        }
+        for (std::size_t index = 0; index < rowCount; ++index) {
+            const auto& session = snapshot.recentSessions[index];
+            const float rowTop = rowsTop + static_cast<float>(index) * 21.0f;
+            const std::wstring start = formatLocalTimestamp(session.interval.start);
+            const std::wstring end =
+                session.active ? L"En cours"
+                               : formatLocalTimestamp(session.interval.end);
+            const std::wstring duration = formatDuration(session.duration);
+            drawText(start.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(startColumn, rowTop, endColumn - 4.0f,
+                                 rowTop + 19.0f));
+            drawText(end.c_str(), compactNavFormat.Get(),
+                     session.active ? cyanBrush.Get() : textBrush.Get(),
+                     D2D1::RectF(endColumn, rowTop, durationColumn - 4.0f,
+                                 rowTop + 19.0f));
+            drawText(duration.c_str(), compactNavFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(durationColumn, rowTop, bounds.right - 10.0f,
+                                 rowTop + 19.0f));
+        }
+    }
+
     D2D1_SIZE_F clientSize() const {
         return renderTarget->GetSize();
     }
@@ -431,6 +797,12 @@ struct DashboardWindow::Impl {
         renderTarget->FillRoundedRectangle(panel, panelBrush.Get());
         renderTarget->DrawRoundedRectangle(panel, borderBrush.Get(), 1.0f);
 
+        if (activePage == DashboardPage::Overview) {
+            drawOverview(contentLeft + 14.0f, contentRight - 14.0f,
+                         panelTop + 10.0f, panelBottom - 10.0f);
+            return;
+        }
+
         const float inset = std::min(36.0f, contentWidth * 0.08f);
         const float textLeft = contentLeft + inset;
         const float textRight = contentRight - inset;
@@ -452,7 +824,7 @@ struct DashboardWindow::Impl {
     const wchar_t* pageDescription() const {
         switch (activePage) {
         case DashboardPage::Overview:
-            return L"Votre vue g\u00e9n\u00e9rale Chronox sera affich\u00e9e ici.";
+            return L"";
         case DashboardPage::History:
             return L"Les p\u00e9riodes et sessions enregistr\u00e9es seront consultables ici.";
         case DashboardPage::Settings:
@@ -593,6 +965,14 @@ struct DashboardWindow::Impl {
             EndPaint(hwnd, &paint);
             return 0;
         }
+        case WM_TIMER:
+            if (wParam == DashboardRefreshTimerId) {
+                if (IsWindowVisible(hwnd)) {
+                    refreshSnapshot();
+                }
+                return 0;
+            }
+            return DefWindowProcW(hwnd, message, wParam, lParam);
         case WM_ERASEBKGND:
             return 1;
         case WM_SIZE:
@@ -647,6 +1027,7 @@ struct DashboardWindow::Impl {
                 }
                 return 0;
             case VK_ESCAPE:
+                KillTimer(hwnd, DashboardRefreshTimerId);
                 ShowWindow(hwnd, SW_HIDE);
                 return 0;
             default:
@@ -660,6 +1041,7 @@ struct DashboardWindow::Impl {
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         case WM_CLOSE:
+            KillTimer(hwnd, DashboardRefreshTimerId);
             ShowWindow(hwnd, SW_HIDE);
             return 0;
         case WM_NCDESTROY:
@@ -674,13 +1056,19 @@ struct DashboardWindow::Impl {
     }
 };
 
-DashboardWindow::DashboardWindow(ErrorHandler errorHandler)
-    : impl_(std::make_unique<Impl>(errorHandler)) {}
+DashboardWindow::DashboardWindow(ErrorHandler errorHandler,
+                                 SnapshotProvider snapshotProvider)
+    : impl_(std::make_unique<Impl>(std::move(errorHandler),
+                                   std::move(snapshotProvider))) {}
 
 DashboardWindow::~DashboardWindow() = default;
 
 void DashboardWindow::showOrActivate() {
     impl_->showOrActivate();
+}
+
+void DashboardWindow::refresh() {
+    impl_->refresh();
 }
 
 } // namespace chronox

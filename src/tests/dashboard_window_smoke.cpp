@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <chrono>
 #include <exception>
 #include <stdexcept>
 #include <string>
@@ -44,7 +46,43 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             throw std::runtime_error(
                 "Could not enable per-monitor DPI awareness for the smoke test");
         }
-        chronox::WindowCoordinator windows(reportError);
+        chronox::WindowCoordinator windows(reportError, [] {
+            chronox::DashboardSnapshot snapshot;
+            snapshot.capturedAt = 1'800'000'000'000'000LL;
+            snapshot.todayRange = chronox::calendarPeriodContaining(
+                snapshot.capturedAt, chronox::CalendarPeriod::Day);
+            snapshot.todayDuration = std::chrono::hours(2);
+            snapshot.weekDuration = std::chrono::hours(10);
+            snapshot.monthDuration = std::chrono::hours(34);
+            snapshot.yearDuration = std::chrono::hours(120);
+            snapshot.trackingActive = true;
+            const auto oneHour =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::hours(1))
+                    .count();
+            const auto fiveHours =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::hours(5))
+                    .count();
+            const auto firstStart =
+                std::max(snapshot.todayRange.start, snapshot.capturedAt - fiveHours);
+            const auto firstEnd = std::max(
+                firstStart, std::min(snapshot.capturedAt - 3 * oneHour,
+                                     snapshot.todayRange.end));
+            const auto secondStart = std::max(
+                snapshot.todayRange.start, snapshot.capturedAt - oneHour);
+            snapshot.todayIntervals = {{firstStart, firstEnd},
+                                       {secondStart, snapshot.capturedAt}};
+            snapshot.weekDays = {
+                std::chrono::hours(2), std::chrono::hours(1),
+                std::chrono::hours(0), std::chrono::hours(3),
+                std::chrono::hours(2), std::chrono::hours(1),
+                std::chrono::hours(1)};
+            snapshot.recentSessions = {
+                {{secondStart, snapshot.capturedAt}, std::chrono::hours(1), true},
+                {{firstStart, firstEnd}, std::chrono::hours(2), false}};
+            return snapshot;
+        });
         windows.openDashboard();
         windows.openDashboard();
 

@@ -43,6 +43,7 @@ if(WIN32)
     add_executable(chronox WIN32
         windows/chronox.rc
         windows/chronox_widget.cpp
+        windows/dashboard_data.cpp
         windows/dashboard_window.cpp
         windows/main.cpp
         windows/widget_presentation.cpp
@@ -106,6 +107,21 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME chronox_storage_tests COMMAND chronox_storage_tests)
 
+    add_executable(chronox_dashboard_data_tests
+        tests/dashboard_data_tests.cpp
+        windows/dashboard_data.cpp
+    )
+    target_link_libraries(chronox_dashboard_data_tests PRIVATE chronox_storage)
+    target_compile_features(chronox_dashboard_data_tests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(chronox_dashboard_data_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(chronox_dashboard_data_tests PRIVATE
+            -Wall -Wextra -Wpedantic
+        )
+    endif()
+    add_test(NAME chronox_dashboard_data_tests COMMAND chronox_dashboard_data_tests)
+
     add_executable(chronox_widget_tests
         tests/widget_presentation_tests.cpp
         windows/widget_presentation.cpp
@@ -122,6 +138,7 @@ if(BUILD_TESTING)
         add_executable(chronox_dashboard_smoke WIN32 EXCLUDE_FROM_ALL
             windows/chronox.rc
             tests/dashboard_window_smoke.cpp
+            windows/dashboard_data.cpp
             windows/dashboard_window.cpp
             windows/window_coordinator.cpp
         )
@@ -129,6 +146,7 @@ if(BUILD_TESTING)
             "${PROJECT_SOURCE_DIR}"
         )
         target_link_libraries(chronox_dashboard_smoke PRIVATE
+            chronox_storage
             User32
             D2d1
             Dwrite

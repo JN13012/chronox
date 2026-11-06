@@ -3,6 +3,7 @@
 #include "windows_session_monitor.h"
 #include "windows_startup.h"
 #include "widget_preferences.h"
+#include "dashboard_data.h"
 
 #include "../core/calendar_period.h"
 #include "../core/utc_timestamp_clock.h"
@@ -172,7 +173,16 @@ int runChronox(bool startHidden,
         }
         PostQuitMessage(1);
     };
-    chronox::WindowCoordinator windowCoordinator(captureError);
+    const auto provideDashboardSnapshot = [&] {
+        if (!tracker.has_value()) {
+            throw std::logic_error("Session tracker is not initialized");
+        }
+        const auto now = SessionTracker::Clock::now();
+        return chronox::queryDashboardSnapshot(
+            database, utcClock.at(now), tracker->isCounting());
+    };
+    chronox::WindowCoordinator windowCoordinator(captureError,
+                                                provideDashboardSnapshot);
 
     const auto stop = [&] {
         try {
@@ -200,6 +210,7 @@ int runChronox(bool startHidden,
                 if (widget != nullptr) {
                     widget->refresh();
                 }
+                windowCoordinator.refreshDashboard();
             } catch (...) {
                 captureError(std::current_exception());
             }
@@ -213,6 +224,7 @@ int runChronox(bool startHidden,
                 if (widget != nullptr) {
                     widget->refresh();
                 }
+                windowCoordinator.refreshDashboard();
             } catch (...) {
                 captureError(std::current_exception());
             }
