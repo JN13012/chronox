@@ -1,14 +1,22 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
-param()
+param(
+    [switch]$LegacyValidationOnly
+)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $rootPrefix = $repositoryRoot.TrimEnd('\') + '\'
-$candidatePaths = @((Join-Path $repositoryRoot 'build'),
-    (Join-Path $repositoryRoot 'out\build'))
-Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |
-    Where-Object { $_.Name -like 'cmake-build-*' } |
-    ForEach-Object { $candidatePaths += $_.FullName }
+if ($LegacyValidationOnly) {
+    $candidatePaths = @(
+        (Join-Path $repositoryRoot 'build\p1.3.1-validation')
+    )
+} else {
+    $candidatePaths = @((Join-Path $repositoryRoot 'build'),
+        (Join-Path $repositoryRoot 'out\build'))
+    Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |
+        Where-Object { $_.Name -like 'cmake-build-*' } |
+        ForEach-Object { $candidatePaths += $_.FullName }
+}
 
 $buildDirectories = @()
 foreach ($path in $candidatePaths | Select-Object -Unique) {
@@ -35,7 +43,29 @@ foreach ($path in $candidatePaths | Select-Object -Unique) {
         }
     }
 
-    $cache = Join-Path $candidate 'CMakeCache.txt'
+    if ($LegacyValidationOnly) {
+        $buildRoot = Join-Path $repositoryRoot 'build'
+        if (-not [string]::Equals(
+                [System.IO.Path]::GetDirectoryName($candidate), $buildRoot,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(
+                [System.IO.Path]::GetFileName($candidate),
+                'p1.3.1-validation', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Le chemin de validation n'est pas celui attendu : $candidate"
+        }
+        if (-not (Test-Path -LiteralPath $buildRoot -PathType Container)) {
+            Write-Host "Dossier de build parent absent ; validation ignorée : $candidate"
+            continue
+        }
+        $buildRootItem = Get-Item -LiteralPath $buildRoot -Force
+        if (($buildRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Write-Warning "Dossier build symbolique ignoré : $candidate"
+            continue
+        }
+        $cache = Join-Path $buildRoot 'CMakeCache.txt'
+    } else {
+        $cache = Join-Path $candidate 'CMakeCache.txt'
+    }
     if (-not (Test-Path -LiteralPath $cache -PathType Leaf)) {
         Write-Host "Dossier ignoré (cache CMake absent) : $candidate"
         continue
@@ -60,6 +90,23 @@ foreach ($path in $candidatePaths | Select-Object -Unique) {
     if ($reparsePoints.Count -gt 0) {
         Write-Warning "Dossier ignoré (lien détecté, suppression récursive refusée) : $candidate"
         continue
+    }
+    if ($LegacyValidationOnly) {
+        $expectedNames = @(
+            'chronox.exe',
+            'chronox_core.lib',
+            'chronox_dashboard_smoke.exe',
+            'chronox_sqlite.lib',
+            'chronox_storage.lib'
+        )
+        $entries = @(Get-ChildItem -LiteralPath $candidate -Force)
+        $unexpectedEntries = @($entries | Where-Object {
+            $_.PSIsContainer -or $expectedNames -notcontains $_.Name
+        })
+        if ($unexpectedEntries.Count -gt 0) {
+            Write-Warning "Dossier de validation modifié ; suppression refusée : $candidate"
+            continue
+        }
     }
     $buildDirectories += $candidate
 }
@@ -87,11 +134,30 @@ foreach ($directory in $buildDirectories) {
         }
         continue
     }
-    Write-Host "Artefacts CMake/MSVC ciblés : $directory"
+    if ($LegacyValidationOnly) {
+        Write-Host "Artefacts de validation historiques ciblés : $directory"
+    } else {
+        Write-Host "Artefacts CMake/MSVC ciblés : $directory"
+    }
     if ($PSCmdlet.ShouldProcess(
             $directory, 'Supprimer les seuls artefacts de build reconstruisibles')) {
-        Remove-Item -LiteralPath $directory -Recurse -Force
-        Write-Host "Build supprimé : $directory"
+        if ($LegacyValidationOnly) {
+            $files = @(Get-ChildItem -LiteralPath $directory -File -Force |
+                Sort-Object @{ Expression = { if ($_.Extension -eq '.exe') { 1 } else { 0 } } }, Name)
+            foreach ($file in $files) {
+                Remove-Item -LiteralPath $file.FullName -Force
+                Write-Host "Artefact de validation supprimé : $($file.Name)"
+            }
+            if (@(Get-ChildItem -LiteralPath $directory -Force).Count -eq 0) {
+                Remove-Item -LiteralPath $directory -Force
+                Write-Host "Validation historique supprimée : $directory"
+            } else {
+                Write-Warning "Le dossier de validation est conservé car des fichiers n'ont pas pu être retirés : $directory"
+            }
+        } else {
+            Remove-Item -LiteralPath $directory -Recurse -Force
+            Write-Host "Build supprimé : $directory"
+        }
     } else {
         Write-Host "Suppression prévisualisée : $directory"
     }

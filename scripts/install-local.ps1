@@ -77,10 +77,33 @@ $installRoot = [System.IO.Path]::GetFullPath(
 $stableExecutable = Join-Path $installRoot 'chronox.exe'
 $stableAssetsRoot = Join-Path $installRoot 'assets'
 $stableAssets = Join-Path $stableAssetsRoot 'ui'
+$startMenu = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+if ([string]::IsNullOrWhiteSpace($startMenu)) {
+    throw 'Le dossier du menu Démarrer de l''utilisateur est introuvable.'
+}
+$startMenuShortcut = Join-Path $startMenu 'Chronox.lnk'
 $token = [guid]::NewGuid().ToString('N')
 $stagingDirectory = Join-Path $installRoot ".$token.staging"
 $backupDirectory = Join-Path $installRoot ".$token.backup"
 $stagedAssets = Join-Path $stagingDirectory 'assets\ui'
+
+if (Test-Path -LiteralPath $startMenuShortcut) {
+    $shortcutItem = Get-Item -LiteralPath $startMenuShortcut -Force
+    if ($shortcutItem.PSIsContainer -or
+        ($shortcutItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Le chemin du raccourci Chronox n'est pas un fichier ordinaire ; remplacement refusé : $startMenuShortcut"
+    }
+    $shell = New-Object -ComObject WScript.Shell
+    $existingShortcut = $shell.CreateShortcut($startMenuShortcut)
+    $existingTarget = [string]$existingShortcut.TargetPath
+    if ([string]::IsNullOrWhiteSpace($existingTarget) -or
+        -not [string]::Equals(
+            [System.IO.Path]::GetFullPath($existingTarget),
+            [System.IO.Path]::GetFullPath($stableExecutable),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Un raccourci Chronox existant ne pointe pas vers l'installation stable ; il est conservé : $startMenuShortcut"
+    }
+}
 
 if (Test-Path -LiteralPath $installRoot -PathType Container) {
     $installRootItem = Get-Item -LiteralPath $installRoot -Force
@@ -290,7 +313,20 @@ foreach ($candidate in @($stagingDirectory, $backupDirectory)) {
     }
 }
 
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($startMenuShortcut)
+    $shortcut.TargetPath = $stableExecutable
+    $shortcut.WorkingDirectory = $installRoot
+    $shortcut.IconLocation = "$stableExecutable,0"
+    $shortcut.Description = 'Chronox'
+    $shortcut.Save()
+} catch {
+    throw "Installation stable effectuée, mais création du raccourci Chronox impossible ($startMenuShortcut) : $($_.Exception.Message)"
+}
+
 Write-Host "Installation stable réussie : $stableExecutable"
+Write-Host "Raccourci du menu Démarrer créé : $startMenuShortcut"
 Write-Host "SHA-256 : $stagedHash"
 if ($updateRunEntry) {
     Write-Host 'HKCU Run Chronox pointe maintenant vers la version stable ; l''état StartupApproved de Windows reste inchangé.'

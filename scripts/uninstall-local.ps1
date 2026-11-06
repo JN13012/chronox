@@ -47,6 +47,34 @@ foreach ($version in $versions) {
 
 $stableExecutable = Join-Path $installRoot 'chronox.exe'
 $stableAssets = Join-Path $installRoot 'assets\ui'
+$startMenu = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+$startMenuShortcut = if ([string]::IsNullOrWhiteSpace($startMenu)) {
+    $null
+} else {
+    Join-Path $startMenu 'Chronox.lnk'
+}
+$removeStartMenuShortcut = $false
+if ($startMenuShortcut -and (Test-Path -LiteralPath $startMenuShortcut)) {
+    $shortcutItem = Get-Item -LiteralPath $startMenuShortcut -Force
+    if ($shortcutItem.PSIsContainer -or
+        ($shortcutItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Write-Warning "Le raccourci Chronox n'est pas un fichier ordinaire ; il sera conservé : $startMenuShortcut"
+    } else {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($startMenuShortcut)
+        $shortcutTarget = [string]$shortcut.TargetPath
+        if ([string]::IsNullOrWhiteSpace($shortcutTarget)) {
+            Write-Warning "La cible du raccourci Chronox est vide ; le raccourci sera conservé : $startMenuShortcut"
+        } elseif ([string]::Equals(
+                [System.IO.Path]::GetFullPath($shortcutTarget),
+                [System.IO.Path]::GetFullPath($stableExecutable),
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            $removeStartMenuShortcut = $true
+        } else {
+            Write-Warning "Le raccourci Chronox ne pointe pas vers cette installation ; il sera conservé : $startMenuShortcut"
+        }
+    }
+}
 foreach ($candidate in @($stableExecutable, $stableAssets)) {
     if (Test-Path -LiteralPath $candidate) {
         $candidateItem = Get-Item -LiteralPath $candidate -Force
@@ -202,6 +230,10 @@ public static class ChronoxLocalProcessNative {
 
 if ($PSCmdlet.ShouldProcess(
         $installRoot, 'Désinstaller Chronox et ses versions installées')) {
+    if ($removeStartMenuShortcut) {
+        Remove-Item -LiteralPath $startMenuShortcut -Force
+        Write-Host "Raccourci du menu Démarrer supprimé : $startMenuShortcut"
+    }
     if ($removeRunEntry) {
         Remove-ItemProperty -LiteralPath $runKeyPath -Name Chronox
         Write-Host 'Entrée HKCU Run Chronox supprimée.'
@@ -220,6 +252,9 @@ if ($PSCmdlet.ShouldProcess(
         Write-Host "Ressources installées supprimées : $stableAssets"
     }
 } elseif ($WhatIfPreference) {
+    if ($removeStartMenuShortcut) {
+        Write-Host "Suppression prévisualisée : $startMenuShortcut"
+    }
     if ($removeRunEntry) {
         Write-Host 'Suppression prévisualisée : HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Chronox'
     }

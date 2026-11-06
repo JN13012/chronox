@@ -93,11 +93,14 @@ Après une compilation Release, le script facultatif
 côté de la cible, vérifié par SHA-256, puis effectué avec sauvegarde et retour
 arrière en cas d’échec. Le script ne ferme jamais Chronox : il refuse de
 remplacer un binaire stable en cours d’utilisation et laisse tourner une
-ancienne copie. Il ne touche ni à la base ni aux préférences et ne crée jamais
-une entrée de démarrage. Il met à jour HKCU Run uniquement si une inscription
-Chronox existante pointait déjà vers une ancienne installation connue. Les
-anciennes copies restent disponibles jusqu’à leur suppression manuelle
-confirmée.
+ancienne copie. Il crée aussi `Chronox.lnk` dans le menu Démarrer de
+l’utilisateur, pointant vers l’exécutable stable avec l’icône Chronox intégrée.
+La désinstallation retire ce raccourci uniquement s’il pointe vers cette
+installation. Le script ne touche ni à la base ni aux préférences et ne crée
+jamais une entrée de démarrage. Il met à jour HKCU Run uniquement si une
+inscription Chronox existante pointait déjà vers une ancienne installation
+connue. Les anciennes copies restent disponibles jusqu’à leur suppression
+manuelle confirmée.
 
 Après l’installation, fermez proprement une éventuelle ancienne instance avant
 de tester le nouveau binaire. Pour compiler en Release puis installer en une
@@ -122,9 +125,9 @@ Les scripts fonctionnent sous Windows PowerShell 5.1 et PowerShell 7 :
 .\scripts\uninstall-local.ps1 -WhatIf
 .\scripts\uninstall-local.ps1
 
-# Prévisualiser ou confirmer le nettoyage des builds CMake/MSVC du dépôt
-.\scripts\clean-build.ps1 -WhatIf
-.\scripts\clean-build.ps1
+# Prévisualiser ou retirer uniquement les artefacts de validation historiques
+.\scripts\clean-build.ps1 -LegacyValidationOnly -WhatIf
+.\scripts\clean-build.ps1 -LegacyValidationOnly
 ```
 
 La désinstallation demande confirmation avant la fermeture normale d’une
@@ -132,8 +135,17 @@ instance installée et avant les suppressions. Elle ne supprime jamais la base,
 les sauvegardes SQLite ni les préférences dans `%LOCALAPPDATA%\Chronox`.
 Le nettoyage ne cible que les dossiers de build CMake dont le cache identifie
 ce dépôt ; il conserve un dossier utilisé par un processus Chronox.
+`-LegacyValidationOnly` limite le nettoyage à l’ancien dossier
+`build\p1.3.1-validation` et conserve le build courant ainsi que les exécutables
+CTest. Sans cette option, le nettoyage complet retire le dossier de build
+CMake/MSVC sélectionné.
 `-WhatIf` affiche les opérations envisagées sans les exécuter. Aucun de ces
 scripts n’active le démarrage Windows ou ne requiert de privilèges administrateur.
+
+Pour masquer les exécutables et fichiers temporaires du dépôt dans Windows
+Search sans supprimer les fichiers, ajoutez manuellement le dossier `build\`
+du dépôt à Paramètres > Confidentialité et sécurité > Recherche dans Windows >
+Dossiers exclus. Chronox ne modifie pas les paramètres d’indexation Windows.
 
 Voir [docs/SPEC.md](docs/SPEC.md) pour le périmètre, les règles de mesure et les
 vérifications manuelles. Voir [docs/PERFORMANCE.md](docs/PERFORMANCE.md) pour
