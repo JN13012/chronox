@@ -56,9 +56,12 @@ expose `SessionDatabase::queryHistory` pour consulter en lecture seule les
 cumuls et segments réellement comptés d’une période, y compris une date
 antérieure. Le temps déclaré est distinct et indisponible en l’absence de
 données déclaratives. Le dashboard natif P1.3.1 fournit sa fenêtre et sa
-navigation ; ses pages de statistiques, d’historique et de paramètres seront
-complétées par étapes. Un clic sur le compteur du widget ou un double-clic sur
-l’icône de notification l’ouvre ; son menu propose également cette commande.
+navigation. Sa page Historique P1.3.3 permet de parcourir les jours, semaines,
+mois et années, avec des graphiques et des sessions issus de
+`SessionDatabase::queryHistory` ; la moyenne est calculée par jour actif. Les
+paramètres du dashboard restent à compléter. Un clic sur le compteur du widget
+ou un double-clic sur l’icône de notification l’ouvre ; son menu propose
+également cette commande.
 Fermer le dashboard le masque sans arrêter Chronox. L’affichage du widget se
 met à jour lors des transitions et chaque seconde uniquement lorsqu’il est
 déployé et que le suivi compte.

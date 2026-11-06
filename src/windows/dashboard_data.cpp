@@ -3,6 +3,7 @@
 #include "../storage/session_database.h"
 
 #include <algorithm>
+#include <ctime>
 #include <stdexcept>
 
 namespace chronox {
@@ -36,6 +37,39 @@ TimeRange dayContaining(Timestamp timestamp,
         return calendarPeriodContaining(timestamp, CalendarPeriod::Day);
     }
     return calendarPeriodContaining(timestamp, CalendarPeriod::Day, *converter);
+}
+
+std::tm localTime(std::time_t timestamp) {
+    std::tm result{};
+#if defined(_WIN32)
+    if (localtime_s(&result, &timestamp) != 0) {
+        throw std::runtime_error("Could not read the local calendar date");
+    }
+#else
+    if (localtime_r(&timestamp, &result) == nullptr) {
+        throw std::runtime_error("Could not read the local calendar date");
+    }
+#endif
+    return result;
+}
+
+std::time_t localTimestamp(std::tm value,
+                           const CalendarTimeConverter* converter) {
+    if (converter != nullptr) {
+        return converter->toTimestamp(value);
+    }
+    value.tm_isdst = -1;
+    const std::time_t result = std::mktime(&value);
+    if (result == static_cast<std::time_t>(-1)) {
+        throw std::runtime_error("Could not navigate the local calendar");
+    }
+    return result;
+}
+
+Timestamp toMicroseconds(std::time_t timestamp) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::seconds(timestamp))
+        .count();
 }
 
 } // namespace
@@ -103,6 +137,97 @@ DashboardSnapshot queryDashboardSnapshot(
              active});
     }
     return snapshot;
+}
+
+DashboardHistorySnapshot queryDashboardHistory(
+    const SessionDatabase& database, CalendarPeriod period, Timestamp anchor,
+    Timestamp now, bool trackingActive,
+    const CalendarTimeConverter* converter) {
+    const HistoryReport report =
+        converter == nullptr
+            ? database.queryHistory(period, anchor, now)
+            : database.queryHistory(period, anchor, now, *converter);
+    DashboardHistorySnapshot snapshot;
+    snapshot.period = period;
+    snapshot.anchor = anchor;
+    snapshot.range = report.range;
+    snapshot.capturedAt = now;
+    snapshot.duration = asSeconds(report.sessionDuration);
+    snapshot.daysWithActivity = report.daysWithDuration;
+    snapshot.trackingActive = trackingActive;
+    snapshot.sessions.reserve(report.sessionIntervals.size());
+    for (std::size_t index = 0; index < report.sessionIntervals.size(); ++index) {
+        const TimeRange interval = report.sessionIntervals[index];
+        const bool active = trackingActive && index + 1 == report.sessionIntervals.size() &&
+                            interval.end == now;
+        snapshot.sessions.push_back(
+            {interval,
+             asSeconds(std::chrono::microseconds(interval.end - interval.start)),
+             active});
+    }
+
+    Timestamp bucketStart = report.range.start;
+    const CalendarPeriod bucketPeriod =
+        period == CalendarPeriod::Year ? CalendarPeriod::Month
+                                       : CalendarPeriod::Day;
+    while (bucketStart < report.range.end) {
+        TimeRange bucket = converter == nullptr
+                               ? calendarPeriodContaining(bucketStart, bucketPeriod)
+                               : calendarPeriodContaining(bucketStart, bucketPeriod,
+                                                          *converter);
+        bucket.start = bucketStart;
+        bucket.end = std::min(bucket.end, report.range.end);
+        std::chrono::microseconds duration{};
+        for (const auto& interval : report.sessionIntervals) {
+            const Timestamp start = std::max(bucket.start, interval.start);
+            const Timestamp end = std::min(bucket.end, interval.end);
+            if (end > start) {
+                duration += std::chrono::microseconds(end - start);
+            }
+        }
+        snapshot.buckets.push_back({bucket, asSeconds(duration)});
+        if (bucket.end <= bucketStart) {
+            throw std::runtime_error(
+                "Calendar bucket did not advance while building history");
+        }
+        bucketStart = bucket.end;
+    }
+    return snapshot;
+}
+
+Timestamp shiftCalendarPeriod(Timestamp anchor, CalendarPeriod period, int delta,
+                              const CalendarTimeConverter* converter) {
+    if (converter != nullptr &&
+        (converter->toLocal == nullptr || converter->toTimestamp == nullptr)) {
+        throw std::invalid_argument("Calendar time converter is incomplete");
+    }
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(anchor));
+    std::tm local = converter == nullptr
+                        ? localTime(static_cast<std::time_t>(seconds.count()))
+                        : converter->toLocal(static_cast<std::time_t>(seconds.count()));
+    switch (period) {
+    case CalendarPeriod::Day:
+        local.tm_mday += delta;
+        break;
+    case CalendarPeriod::Week:
+        local.tm_mday += delta * 7;
+        break;
+    case CalendarPeriod::Month:
+        local.tm_mday = 1;
+        local.tm_mon += delta;
+        break;
+    case CalendarPeriod::Year:
+        local.tm_mday = 1;
+        local.tm_mon = 0;
+        local.tm_year += delta;
+        break;
+    }
+    local.tm_hour = 12;
+    local.tm_min = 0;
+    local.tm_sec = 0;
+    local.tm_isdst = -1;
+    return toMicroseconds(localTimestamp(local, converter));
 }
 
 } // namespace chronox

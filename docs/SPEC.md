@@ -19,9 +19,10 @@ Inclus :
 - widget Win32 natif avec ressources PNG transparentes, rendu WIC,
   Direct2D/DirectWrite, languette rétractable et icône de notification.
 
-Exclus : contenu détaillé du dashboard (son shell natif et sa navigation P1.3.1
-sont implémentés), historique graphique, suivi des applications, service
-Windows, serveur, service cloud et mesure antérieure au démarrage du programme.
+Exclus du périmètre fonctionnel V0 : contenu détaillé du dashboard, suivi des
+applications, service Windows, serveur, service cloud et mesure antérieure au
+démarrage du programme. Le shell P1.3.1 et l’historique graphique P1.3.3 sont
+des extensions d’interface décrites dans la [spécification UI](./UI_SPEC.md).
 
 ## Règles de comptabilisation
 
@@ -104,9 +105,10 @@ Windows, serveur, service cloud et mesure antérieure au démarrage du programme
   dans la [spécification UI](./UI_SPEC.md).
 - Les préférences de position, d’état et d’épinglage ne sont pas persistées
   dans P1.3.1. Le dashboard P1.3.1 possède une fenêtre indépendante
-  redimensionnable, l’icône Chronox et la navigation vers trois pages ; la vue
-  générale, l’historique détaillé, les paramètres et les anneaux horaires
-  restent à implémenter. Fermer cette fenêtre la masque sans arrêter le suivi.
+  redimensionnable, l’icône Chronox et la navigation vers trois pages. La vue
+  générale et l’historique interactif P1.3.3 sont implémentés ; les paramètres
+  et les anneaux horaires restent à implémenter. Fermer cette fenêtre la
+  masque sans arrêter le suivi.
 
 ## Cas limites
 

@@ -12,8 +12,11 @@ class DashboardWindow {
 public:
     using ErrorHandler = std::function<void(std::exception_ptr)>;
     using SnapshotProvider = std::function<DashboardSnapshot()>;
+    using HistoryProvider =
+        std::function<DashboardHistorySnapshot(CalendarPeriod, Timestamp)>;
 
-    DashboardWindow(ErrorHandler errorHandler, SnapshotProvider snapshotProvider);
+    DashboardWindow(ErrorHandler errorHandler, SnapshotProvider snapshotProvider,
+                    HistoryProvider historyProvider);
     ~DashboardWindow();
 
     DashboardWindow(const DashboardWindow&) = delete;

@@ -122,7 +122,12 @@ Implémenté dans le prototype Windows :
 - fenêtre dashboard native indépendante, redimensionnable, avec barre de titre
   Windows, icône officielle Chronox, fond graphite et navigation vers Vue
   générale, Historique et Paramètres ; la Vue générale est sélectionnée par
-  défaut. Le contenu de ces pages reste en cours d’implémentation.
+  défaut ;
+- historique graphique P1.3.3 avec navigation jour/semaine/mois/année,
+  calendrier Win32, résumé des totaux et jours actifs, graphiques et détail
+  des sessions calculés depuis `SessionDatabase::queryHistory`. La sélection
+  d’un jour affiche ses segments comptabilisés ; le dashboard ne modifie pas
+  SQLite et distingue les jours actifs des jours calendaires de la moyenne.
 - ouverture du dashboard par clic sur le compteur, double-clic sur l’icône de
   notification ou commande du menu de notification. Sa fermeture masque la
   fenêtre sans arrêter Chronox.
@@ -134,17 +139,14 @@ monitoring existante, et la sauvegarde SQLite reste à son rythme d’une minute
 Les bibliothèques Windows peuvent créer des threads internes, comme le montre
 le comptage du processus dans le [bilan de performance](./PERFORMANCE.md).
 
-Non inclus dans P1.3.1 : données et graphiques des pages du dashboard,
-historique navigable, arcs horaires, plage configurable, persistance des
-préférences et suivi applicatif. Le shell du dashboard est présent, mais ses
-pages de contenu restent à livrer. La languette et les ressources sont un
-prototype ; les résolutions et DPI multiples, l’accessibilité et l’affichage en
-plein écran restent à valider.
+Non inclus dans P1.3.3 : paramètres du dashboard, arcs horaires, plage
+configurable, persistance des préférences et suivi applicatif. La languette et
+les ressources restent un prototype ; l’accessibilité, les résolutions/DPI
+multiples et l’affichage plein écran restent à valider.
 
-Le moteur expose également une API de lecture historique par période et date
-d’ancrage, qui sera présentée dans les prochaines étapes du dashboard : les
-intervalles sont les segments réellement comptabilisés, sans interprétation des
-interruptions. Le temps de session mesuré est distinct du temps de travail
+Le moteur expose une API de lecture historique par période et date d’ancrage ;
+les intervalles sont les segments réellement comptabilisés, sans interprétation
+des interruptions. Le temps de session mesuré est distinct du temps de travail
 déclaré, qui reste indisponible faute de données déclaratives.
 
 Les mesures de consommation et les résultats de compilation Windows sont

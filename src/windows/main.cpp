@@ -181,8 +181,18 @@ int runChronox(bool startHidden,
         return chronox::queryDashboardSnapshot(
             database, utcClock.at(now), tracker->isCounting());
     };
-    chronox::WindowCoordinator windowCoordinator(captureError,
-                                                provideDashboardSnapshot);
+    const auto provideDashboardHistory =
+        [&](chronox::CalendarPeriod period, chronox::Timestamp anchor) {
+            if (!tracker.has_value()) {
+                throw std::logic_error("Session tracker is not initialized");
+            }
+            const auto now = SessionTracker::Clock::now();
+            return chronox::queryDashboardHistory(
+                database, period, anchor, utcClock.at(now),
+                tracker->isCounting());
+        };
+    chronox::WindowCoordinator windowCoordinator(
+        captureError, provideDashboardSnapshot, provideDashboardHistory);
 
     const auto stop = [&] {
         try {

@@ -254,12 +254,100 @@ void weeklyAggregationUsesLocalDstDayBoundaries() {
     verifyDstDay(11, 3, 25h);
 }
 
+void historyPresentationUsesRealPeriodsAndSplitsMidnightSessions() {
+    TemporaryDatabase file;
+    SessionDatabase database(file.path());
+    recordInterval(database, localTime(2024, 6, 11, 23, 30),
+                   localTime(2024, 6, 12, 0, 30));
+    const Timestamp now = localTime(2024, 6, 12, 12);
+    database.setCounting(true, localTime(2024, 6, 12, 11));
+
+    const auto week = chronox::queryDashboardHistory(
+        database, CalendarPeriod::Week, localTime(2024, 6, 11, 12), now, true);
+    require(week.buckets.size() == 7 && week.daysWithActivity == 2,
+            "weekly history exposes seven daily buckets and active-day count");
+    require(week.buckets[2].duration == 90min &&
+                week.buckets[1].duration == 30min &&
+                week.duration == 2h,
+            "history splits cross-midnight time and includes the active interval once");
+    require(week.sessions.size() == 2 && week.sessions[0].duration == 1h &&
+                week.sessions[1].duration == 1h && week.sessions[1].active,
+            "history preserves session rows and identifies an open interval");
+    require(database.latestRecordedTimestamp() == localTime(2024, 6, 12, 0, 30),
+            "querying dashboard history does not write to SQLite");
+
+    const auto overview =
+        chronox::queryDashboardSnapshot(database, now, true);
+    const auto selectedDay = chronox::queryDashboardHistory(
+        database, CalendarPeriod::Day, now, now, true);
+    require(selectedDay.duration == overview.todayDuration &&
+                selectedDay.sessions.size() == overview.todayIntervals.size() &&
+                selectedDay.duration == week.buckets[2].duration,
+            "overview and history agree on today's counted duration and intervals");
+
+    const Timestamp future = localTime(2024, 6, 20, 12);
+    const auto empty = chronox::queryDashboardHistory(
+        database, CalendarPeriod::Day, future, now);
+    require(empty.duration == 0s && empty.sessions.empty() &&
+                empty.daysWithActivity == 0 && empty.buckets.size() == 1,
+            "future empty dates are represented with a zero-valued day bucket");
+}
+
+void historyNavigationUsesCalendarBoundaries() {
+    const Timestamp march31 = localTime(2024, 3, 31, 12);
+    const Timestamp previousMonth = chronox::shiftCalendarPeriod(
+        march31, CalendarPeriod::Month, -1);
+    const auto previousMonthRange = chronox::calendarPeriodContaining(
+        previousMonth, CalendarPeriod::Month);
+    require(previousMonthRange.start == localTime(2024, 2, 1, 0),
+            "month navigation clamps end-of-month dates into the previous month");
+
+    const Timestamp monday = localTime(2024, 6, 10, 12);
+    const auto previousWeek = chronox::calendarPeriodContaining(
+        chronox::shiftCalendarPeriod(monday, CalendarPeriod::Week, -1),
+        CalendarPeriod::Week);
+    require(previousWeek.start == localTime(2024, 6, 3, 0),
+            "week navigation advances by full local calendar weeks");
+    const auto nextYear = chronox::calendarPeriodContaining(
+        chronox::shiftCalendarPeriod(monday, CalendarPeriod::Year, 1),
+        CalendarPeriod::Year);
+    require(nextYear.start == localTime(2025, 1, 1, 0),
+            "year navigation selects the next calendar year");
+}
+
+void historyBucketsRespectDstDayLengths() {
+    const chronox::CalendarTimeConverter converter{
+        easternLocalTime, easternTimestamp};
+    std::tm localNoon{};
+    localNoon.tm_year = 2024 - 1900;
+    localNoon.tm_mon = 3 - 1;
+    localNoon.tm_mday = 10;
+    localNoon.tm_hour = 12;
+    const Timestamp anchor = toMicroseconds(easternTimestamp(localNoon));
+    const auto day = chronox::calendarPeriodContaining(
+        anchor, CalendarPeriod::Day, converter);
+    TemporaryDatabase file;
+    SessionDatabase database(file.path());
+    database.setCounting(true, day.start);
+    database.setCounting(false, day.end);
+    const auto report = chronox::queryDashboardHistory(
+        database, CalendarPeriod::Day, anchor, day.end, false, &converter);
+    require(report.duration == 23h && report.buckets.size() == 1 &&
+                report.buckets.front().range.end -
+                        report.buckets.front().range.start ==
+                    durationTicks(23h),
+            "daily history uses the real 23-hour DST calendar day");
+}
+
 } // namespace
 
 int main() {
     emptyDatabaseProducesEmptyOverview();
     periodsSessionsAndCrossMidnightAreAggregatedFromHistory();
     weeklyAggregationUsesLocalDstDayBoundaries();
+    historyPresentationUsesRealPeriodsAndSplitsMidnightSessions();
+    historyNavigationUsesCalendarBoundaries();
+    historyBucketsRespectDstDayLengths();
     std::cout << "Dashboard data tests passed\n";
     return EXIT_SUCCESS;
 }

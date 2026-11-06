@@ -65,6 +65,7 @@ if(WIN32)
         Windowscodecs
         D2d1
         Dwrite
+        Comctl32
     )
     target_compile_definitions(chronox PRIVATE
         UNICODE
@@ -150,6 +151,7 @@ if(BUILD_TESTING)
             User32
             D2d1
             Dwrite
+            Comctl32
         )
         target_compile_features(chronox_dashboard_smoke PRIVATE cxx_std_20)
         target_compile_definitions(chronox_dashboard_smoke PRIVATE

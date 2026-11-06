@@ -4,6 +4,7 @@
 
 #include <windows.h>
 #include <windowsx.h>
+#include <commctrl.h>
 #include <d2d1.h>
 #include <d2d1helper.h>
 #include <dwrite.h>
@@ -12,9 +13,13 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
+#include <ctime>
 #include <cwchar>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace chronox {
 namespace {
@@ -29,6 +34,7 @@ constexpr float InitialClientWidth = 1050.0f;
 constexpr float InitialClientHeight = 700.0f;
 constexpr UINT_PTR DashboardRefreshTimerId = 1;
 constexpr UINT DashboardRefreshIntervalMs = 15'000;
+constexpr std::size_t MaximumHistoryHitTargets = 56;
 
 enum class DashboardPage {
     Overview,
@@ -68,6 +74,18 @@ std::wstring formatDuration(std::chrono::seconds duration) {
     const auto minutes = totalMinutes % 60;
     return std::to_wstring(hours) + L" h " +
            (minutes < 10 ? L"0" : L"") + std::to_wstring(minutes) + L" min";
+}
+
+std::wstring formatCompactDuration(std::chrono::seconds duration) {
+    const auto totalMinutes =
+        std::chrono::duration_cast<std::chrono::minutes>(duration).count();
+    const auto hours = totalMinutes / 60;
+    const auto minutes = totalMinutes % 60;
+    if (hours == 0) {
+        return std::to_wstring(minutes) + L"m";
+    }
+    return std::to_wstring(hours) + L"h" +
+           (minutes == 0 ? L"" : std::to_wstring(minutes));
 }
 
 std::wstring formatLocalTimestamp(Timestamp timestamp) {
@@ -113,6 +131,128 @@ std::wstring formatYear(Timestamp timestamp) {
     return L"Ann\u00e9e " + std::to_wstring(local.tm_year + 1900);
 }
 
+std::tm localTime(std::time_t timestamp) {
+    std::tm local{};
+    if (localtime_s(&local, &timestamp) != 0) {
+        throw std::runtime_error("Could not format a local history time");
+    }
+    return local;
+}
+
+bool sameLocalMinute(const std::tm& first, const std::tm& second) {
+    return first.tm_year == second.tm_year && first.tm_mon == second.tm_mon &&
+           first.tm_mday == second.tm_mday && first.tm_hour == second.tm_hour &&
+           first.tm_min == second.tm_min;
+}
+
+std::wstring utcOffsetLabel(const std::tm& local) {
+    TIME_ZONE_INFORMATION zone{};
+    if (!GetTimeZoneInformationForYear(
+            static_cast<USHORT>(local.tm_year + 1900), nullptr, &zone)) {
+        throw windowsError("GetTimeZoneInformationForYear(history)",
+                           GetLastError());
+    }
+    const LONG offsetMinutes =
+        -(zone.Bias + (local.tm_isdst > 0 ? zone.DaylightBias : zone.StandardBias));
+    const wchar_t sign = offsetMinutes < 0 ? L'-' : L'+';
+    const int absoluteMinutes =
+        static_cast<int>(offsetMinutes < 0 ? -offsetMinutes : offsetMinutes);
+    wchar_t result[24]{};
+    swprintf_s(result, L" UTC%c%02d:%02d", sign, absoluteMinutes / 60,
+               absoluteMinutes % 60);
+    return result;
+}
+
+bool isAmbiguousLocalTime(const std::tm& local) {
+    std::array<std::time_t, 2> candidates{};
+    std::size_t validCandidates = 0;
+    for (int daylight : {0, 1}) {
+        std::tm candidate = local;
+        candidate.tm_isdst = daylight;
+        const auto timestamp = std::mktime(&candidate);
+        if (timestamp == static_cast<std::time_t>(-1)) {
+            continue;
+        }
+        const std::tm converted = localTime(timestamp);
+        if (sameLocalMinute(local, converted) &&
+            (validCandidates == 0 || candidates[0] != timestamp)) {
+            candidates[validCandidates++] = timestamp;
+        }
+    }
+    return validCandidates == candidates.size();
+}
+
+std::wstring formatHistoryTime(Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    const std::tm local = localTime(value);
+    wchar_t text[32]{};
+    if (wcsftime(text, std::size(text), L"%H:%M", &local) == 0) {
+        throw std::runtime_error("Could not format a history session time");
+    }
+    std::wstring result(text);
+    if (isAmbiguousLocalTime(local)) {
+        result += utcOffsetLabel(local);
+    }
+    return result;
+}
+
+std::wstring formatHistoryDate(Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    const std::tm local = localTime(value);
+    wchar_t text[32]{};
+    if (wcsftime(text, std::size(text), L"%d/%m/%Y", &local) == 0) {
+        throw std::runtime_error("Could not format a history date");
+    }
+    return text;
+}
+
+std::wstring formatHistoryPeriod(CalendarPeriod period, Timestamp anchor) {
+    if (period == CalendarPeriod::Month) {
+        return formatMonthYear(anchor);
+    }
+    if (period == CalendarPeriod::Year) {
+        return formatYear(anchor);
+    }
+    if (period == CalendarPeriod::Week) {
+        const auto range = calendarPeriodContaining(anchor, CalendarPeriod::Week);
+        return formatHistoryDate(range.start) + L" \u2013 " +
+               formatHistoryDate(range.end - 1);
+    }
+    return formatHistoryDate(anchor);
+}
+
+Timestamp timestampFromSystemTime(const SYSTEMTIME& value) {
+    std::tm local{};
+    local.tm_year = static_cast<int>(value.wYear) - 1900;
+    local.tm_mon = static_cast<int>(value.wMonth) - 1;
+    local.tm_mday = static_cast<int>(value.wDay);
+    local.tm_hour = 12;
+    local.tm_isdst = -1;
+    const auto timestamp = std::mktime(&local);
+    if (timestamp == static_cast<std::time_t>(-1)) {
+        throw std::runtime_error("Could not select the calendar date");
+    }
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::seconds(timestamp))
+        .count();
+}
+
+SYSTEMTIME systemTimeFromTimestamp(Timestamp timestamp) {
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::microseconds(timestamp));
+    const auto value = static_cast<std::time_t>(seconds.count());
+    const std::tm local = localTime(value);
+    SYSTEMTIME result{};
+    result.wYear = static_cast<WORD>(local.tm_year + 1900);
+    result.wMonth = static_cast<WORD>(local.tm_mon + 1);
+    result.wDay = static_cast<WORD>(local.tm_mday);
+    return result;
+}
+
 Timestamp localDayHourBoundary(Timestamp dayStart, int hour) {
     const auto seconds = std::chrono::floor<std::chrono::seconds>(
         std::chrono::microseconds(dayStart));
@@ -148,15 +288,21 @@ Timestamp localDayHourBoundary(Timestamp dayStart, int hour) {
 } // namespace
 
 struct DashboardWindow::Impl {
-    Impl(ErrorHandler errorHandlerValue, SnapshotProvider snapshotProviderValue)
+    Impl(ErrorHandler errorHandlerValue, SnapshotProvider snapshotProviderValue,
+         HistoryProvider historyProviderValue)
         : errorHandler(std::move(errorHandlerValue)),
-          snapshotProvider(std::move(snapshotProviderValue)) {}
+          snapshotProvider(std::move(snapshotProviderValue)),
+          historyProvider(std::move(historyProviderValue)) {}
 
     ~Impl() {
         if (window != nullptr && IsWindow(window)) {
             DestroyWindow(window);
         }
         window = nullptr;
+        if (calendarWindow != nullptr && IsWindow(calendarWindow)) {
+            DestroyWindow(calendarWindow);
+        }
+        calendarWindow = nullptr;
         releaseRenderResources();
         if (windowClassRegistered) {
             UnregisterClassW(DashboardClassName, GetModuleHandleW(nullptr));
@@ -165,8 +311,22 @@ struct DashboardWindow::Impl {
 
     ErrorHandler errorHandler{};
     SnapshotProvider snapshotProvider{};
+    HistoryProvider historyProvider{};
     DashboardSnapshot snapshot{};
+    std::map<std::pair<int, Timestamp>, DashboardHistorySnapshot> historyCache{};
+    const DashboardHistorySnapshot* activeHistory{};
+    CalendarPeriod historyPeriod{CalendarPeriod::Day};
+    Timestamp historyAnchor{};
+    Timestamp selectedHistoryDay{};
+    bool historyInitialized{};
+    std::size_t sessionScrollOffset{};
     HWND window{};
+    HWND calendarWindow{};
+    D2D1_RECT_F calendarButtonBounds{};
+    std::array<D2D1_RECT_F, MaximumHistoryHitTargets> historyHitBounds{};
+    std::array<int, MaximumHistoryHitTargets> historyHitActions{};
+    std::array<int, MaximumHistoryHitTargets> historyHitValues{};
+    std::size_t historyHitCount{};
     bool windowClassRegistered{};
     UINT dpi{96};
     DashboardPage activePage{DashboardPage::Overview};
@@ -218,11 +378,22 @@ struct DashboardWindow::Impl {
     }
 
     void refreshSnapshot() {
-        snapshot = snapshotProvider();
+        if (activePage == DashboardPage::History) {
+            loadHistory(true);
+        } else {
+            snapshot = snapshotProvider();
+        }
         render();
     }
 
     void create() {
+        INITCOMMONCONTROLSEX commonControls{};
+        commonControls.dwSize = sizeof(commonControls);
+        commonControls.dwICC = ICC_DATE_CLASSES;
+        if (!InitCommonControlsEx(&commonControls)) {
+            throw windowsError("InitCommonControlsEx(history calendar)",
+                               GetLastError());
+        }
         checkHr(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
                                   d2dFactory.GetAddressOf()),
                 "D2D1CreateFactory(dashboard)");
@@ -292,6 +463,14 @@ struct DashboardWindow::Impl {
             GetModuleHandleW(nullptr), this);
         if (window == nullptr) {
             throw windowsError("CreateWindowExW(dashboard)", GetLastError());
+        }
+
+        calendarWindow = CreateWindowExW(
+            WS_EX_TOPMOST, MONTHCAL_CLASSW, L"",
+            WS_POPUP | WS_BORDER | MCS_NOTODAY, 0, 0, 300, 240, window, nullptr,
+            GetModuleHandleW(nullptr), nullptr);
+        if (calendarWindow == nullptr) {
+            throw windowsError("CreateWindowExW(history calendar)", GetLastError());
         }
 
         dpi = GetDpiForWindow(window);
@@ -575,7 +754,7 @@ struct DashboardWindow::Impl {
     }
 
     void drawWeekChart(D2D1_RECT_F bounds) {
-        drawText(L"HEURES · LUNDI AU DIMANCHE", compactNavFormat.Get(),
+        drawText(L"HEURES \u00b7 LUNDI AU DIMANCHE", compactNavFormat.Get(),
                  cyanBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 8.0f, bounds.top + 25.0f));
@@ -681,6 +860,655 @@ struct DashboardWindow::Impl {
                      D2D1::RectF(durationColumn, rowTop, bounds.right - 10.0f,
                                  rowTop + 19.0f));
         }
+    }
+
+    void loadHistory(bool force) {
+        if (!historyInitialized) {
+            historyAnchor = snapshot.capturedAt;
+            selectedHistoryDay =
+                calendarPeriodContaining(snapshot.capturedAt,
+                                         CalendarPeriod::Day)
+                    .start;
+            historyInitialized = true;
+        }
+        if (!historyProvider) {
+            throw std::logic_error("The dashboard history provider is unavailable");
+        }
+        const TimeRange range =
+            calendarPeriodContaining(historyAnchor, historyPeriod);
+        const auto key = std::make_pair(static_cast<int>(historyPeriod), range.start);
+        auto found = historyCache.find(key);
+        const bool currentPeriodIsStale =
+            found != historyCache.end() && range.start <= snapshot.capturedAt &&
+            snapshot.capturedAt < range.end &&
+            found->second.capturedAt < snapshot.capturedAt;
+        if (force || found == historyCache.end() || currentPeriodIsStale) {
+            DashboardHistorySnapshot history =
+                historyProvider(historyPeriod, historyAnchor);
+            found = historyCache.insert_or_assign(key, std::move(history)).first;
+            if (historyCache.size() > 32) {
+                auto oldest = historyCache.begin();
+                if (oldest == found) {
+                    ++oldest;
+                }
+                if (oldest != historyCache.end()) {
+                    historyCache.erase(oldest);
+                }
+            }
+        }
+        activeHistory = &found->second;
+        if (activeHistory->capturedAt >= snapshot.capturedAt) {
+            snapshot.capturedAt = activeHistory->capturedAt;
+            snapshot.trackingActive = activeHistory->trackingActive;
+        }
+    }
+
+    void addHistoryHit(D2D1_RECT_F bounds, int action, int value = 0) {
+        if (historyHitCount >= historyHitBounds.size()) {
+            throw std::logic_error("Dashboard history hit target capacity exceeded");
+        }
+        historyHitBounds[historyHitCount] = bounds;
+        historyHitActions[historyHitCount] = action;
+        historyHitValues[historyHitCount] = value;
+        ++historyHitCount;
+    }
+
+    int hitTestHistory(int x, int y, int& value) const {
+        for (std::size_t index = 0; index < historyHitCount; ++index) {
+            const auto& bounds = historyHitBounds[index];
+            if (x >= bounds.left && x < bounds.right && y >= bounds.top &&
+                y < bounds.bottom) {
+                value = historyHitValues[index];
+                return historyHitActions[index];
+            }
+        }
+        return -1;
+    }
+
+    void navigateHistory(int delta) {
+        historyAnchor =
+            shiftCalendarPeriod(historyAnchor, historyPeriod, delta);
+        selectedHistoryDay =
+            calendarPeriodContaining(historyAnchor, CalendarPeriod::Day).start;
+        sessionScrollOffset = 0;
+        loadHistory(false);
+        render();
+    }
+
+    void chooseHistoryPeriod(CalendarPeriod period) {
+        historyPeriod = period;
+        historyAnchor = selectedHistoryDay;
+        sessionScrollOffset = 0;
+        loadHistory(false);
+        render();
+    }
+
+    void selectHistoryDay(Timestamp timestamp) {
+        selectedHistoryDay =
+            calendarPeriodContaining(timestamp, CalendarPeriod::Day).start;
+        historyAnchor = selectedHistoryDay;
+        sessionScrollOffset = 0;
+        loadHistory(false);
+        render();
+    }
+
+    void selectHistoryBucket(std::size_t index) {
+        if (activeHistory == nullptr || index >= activeHistory->buckets.size()) {
+            return;
+        }
+        const auto bucket = activeHistory->buckets[index];
+        if (historyPeriod == CalendarPeriod::Year) {
+            historyPeriod = CalendarPeriod::Month;
+            historyAnchor = bucket.range.start;
+            selectedHistoryDay = bucket.range.start;
+            sessionScrollOffset = 0;
+            loadHistory(false);
+        } else {
+            selectHistoryDay(bucket.range.start);
+        }
+        render();
+    }
+
+    void showHistoryCalendar() {
+        if (calendarWindow == nullptr || !IsWindow(calendarWindow)) {
+            throw std::logic_error("The dashboard history calendar is unavailable");
+        }
+        const SYSTEMTIME selected = systemTimeFromTimestamp(selectedHistoryDay);
+        if (!SendMessageW(calendarWindow, MCM_SETCURSEL, 0,
+                          reinterpret_cast<LPARAM>(&selected))) {
+            throw windowsError("MonthCal_SetCurSel(history)", GetLastError());
+        }
+        POINT position{
+            static_cast<LONG>(calendarButtonBounds.left),
+            static_cast<LONG>(calendarButtonBounds.bottom)};
+        if (!ClientToScreen(window, &position)) {
+            throw windowsError("ClientToScreen(history calendar)", GetLastError());
+        }
+        const int calendarWidth = MulDiv(300, static_cast<int>(dpi), 96);
+        const int calendarHeight = MulDiv(240, static_cast<int>(dpi), 96);
+        SetWindowPos(calendarWindow, HWND_TOPMOST, position.x, position.y,
+                     calendarWidth, calendarHeight,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetForegroundWindow(calendarWindow);
+    }
+
+    void applyHistoryAction(int action, int value) {
+        switch (action) {
+        case 0:
+            chooseHistoryPeriod(static_cast<CalendarPeriod>(value));
+            break;
+        case 1:
+            navigateHistory(-1);
+            break;
+        case 2:
+            navigateHistory(1);
+            break;
+        case 3:
+            historyAnchor = snapshot.capturedAt;
+            selectedHistoryDay =
+                calendarPeriodContaining(snapshot.capturedAt,
+                                         CalendarPeriod::Day)
+                    .start;
+            sessionScrollOffset = 0;
+            loadHistory(false);
+            render();
+            break;
+        case 4:
+            showHistoryCalendar();
+            break;
+        case 5:
+            selectHistoryBucket(static_cast<std::size_t>(value));
+            break;
+        default:
+            break;
+        }
+    }
+
+    void drawHistoryNavigation(D2D1_RECT_F bounds) {
+        const float width = bounds.right - bounds.left;
+        const float tabWidth = width * 0.43f / 4.0f;
+        const float tabGap = 2.0f;
+        constexpr std::array<const wchar_t*, 4> labels{
+            L"Jour", L"Semaine", L"Mois", L"Ann\u00e9e"};
+        const std::array<CalendarPeriod, 4> periods{
+            CalendarPeriod::Day, CalendarPeriod::Week, CalendarPeriod::Month,
+            CalendarPeriod::Year};
+        float x = bounds.left;
+        for (std::size_t index = 0; index < periods.size(); ++index) {
+            const D2D1_RECT_F tab =
+                D2D1::RectF(x, bounds.top, x + tabWidth, bounds.bottom);
+            renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(tab, 5.0f, 5.0f),
+                historyPeriod == periods[index] ? accentBrush.Get()
+                                                : panelHoverBrush.Get());
+            drawText(labels[index], compactNavFormat.Get(),
+                     historyPeriod == periods[index] ? textBrush.Get()
+                                                     : mutedBrush.Get(),
+                     D2D1::RectF(tab.left + 2.0f, tab.top + 4.0f,
+                                 tab.right - 2.0f, tab.bottom - 3.0f));
+            addHistoryHit(tab, 0, static_cast<int>(periods[index]));
+            x += tabWidth + tabGap;
+        }
+
+        const float navGap = 5.0f;
+        const float buttonWidth = 28.0f;
+        const D2D1_RECT_F previous =
+            D2D1::RectF(x, bounds.top, x + buttonWidth, bounds.bottom);
+        renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(previous, 5.0f, 5.0f), panelHoverBrush.Get());
+        drawText(L"<", pageFormat.Get(), textBrush.Get(),
+                 D2D1::RectF(previous.left, previous.top - 2.0f, previous.right,
+                             previous.bottom));
+        addHistoryHit(previous, 1);
+        x += buttonWidth + navGap;
+
+        const D2D1_RECT_F next =
+            D2D1::RectF(x, bounds.top, x + buttonWidth, bounds.bottom);
+        renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(next, 5.0f, 5.0f), panelHoverBrush.Get());
+        drawText(L">", pageFormat.Get(), textBrush.Get(),
+                 D2D1::RectF(next.left, next.top - 2.0f, next.right,
+                             next.bottom));
+        addHistoryHit(next, 2);
+        x += buttonWidth + navGap;
+
+        const float todayWidth = std::min(62.0f, width * 0.15f);
+        const float calendarWidth = 34.0f;
+        const float dateTextRight = bounds.right - todayWidth - navGap -
+                                    calendarWidth - navGap;
+        const float dateTextLeft = x + 3.0f;
+        const std::wstring periodLabel =
+            formatHistoryPeriod(historyPeriod, historyAnchor);
+        drawText(periodLabel.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                 D2D1::RectF(dateTextLeft, bounds.top + 5.0f, dateTextRight,
+                             bounds.bottom - 3.0f));
+
+        calendarButtonBounds =
+            D2D1::RectF(dateTextRight + navGap, bounds.top,
+                        dateTextRight + navGap + calendarWidth, bounds.bottom);
+        renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(calendarButtonBounds, 5.0f, 5.0f),
+            panelHoverBrush.Get());
+        drawText(L"DATE", compactNavFormat.Get(), cyanBrush.Get(),
+                 D2D1::RectF(calendarButtonBounds.left + 4.0f,
+                             calendarButtonBounds.top + 4.0f,
+                             calendarButtonBounds.right - 4.0f,
+                             calendarButtonBounds.bottom - 3.0f));
+        addHistoryHit(calendarButtonBounds, 4);
+
+        const D2D1_RECT_F today =
+            D2D1::RectF(bounds.right - todayWidth, bounds.top, bounds.right,
+                        bounds.bottom);
+        renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(today, 5.0f, 5.0f), panelHoverBrush.Get());
+        drawText(L"Aujourd'hui", compactNavFormat.Get(), cyanBrush.Get(),
+                 D2D1::RectF(today.left + 2.0f, today.top + 5.0f,
+                             today.right - 2.0f, today.bottom - 3.0f));
+        addHistoryHit(today, 3);
+    }
+
+    void drawHistorySummary(D2D1_RECT_F bounds) {
+        const std::array<std::wstring, 4> values{
+            formatDuration(activeHistory->duration),
+            std::to_wstring(activeHistory->daysWithActivity),
+            std::to_wstring(activeHistory->sessions.size()),
+            activeHistory->daysWithActivity == 0
+                ? L"\u2014"
+                : formatDuration(std::chrono::seconds(
+                      activeHistory->duration.count() /
+                      static_cast<std::int64_t>(activeHistory->daysWithActivity)))};
+        constexpr std::array<const wchar_t*, 4> labels{
+            L"COMPTABILIS\u00c9", L"JOURS ACTIFS", L"SESSIONS",
+            L"MOY. / JOUR ACTIF"};
+        const float gap = 6.0f;
+        const float cardWidth =
+            (bounds.right - bounds.left - gap * 3.0f) / 4.0f;
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            const float left =
+                bounds.left + static_cast<float>(index) * (cardWidth + gap);
+            const D2D1_RECT_F card =
+                D2D1::RectF(left, bounds.top, left + cardWidth, bounds.bottom);
+            drawCard(card);
+            drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(card.left + 7.0f, card.top + 5.0f,
+                                 card.right - 5.0f, card.top + 19.0f));
+            drawText(values[index].c_str(), compactNavFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(card.left + 7.0f, card.top + 22.0f,
+                                 card.right - 5.0f, card.bottom - 3.0f));
+        }
+    }
+
+    void drawHistoryDayTimeline(D2D1_RECT_F bounds) {
+        drawText(L"FRISE DES HEURES", compactNavFormat.Get(), cyanBrush.Get(),
+                 D2D1::RectF(bounds.left + 8.0f, bounds.top + 4.0f,
+                             bounds.right - 8.0f, bounds.top + 21.0f));
+        const float left = bounds.left + 12.0f;
+        const float right = bounds.right - 12.0f;
+        const float trackTop = bounds.top + 42.0f;
+        const float trackBottom = trackTop + 22.0f;
+        renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(
+                D2D1::RectF(left, trackTop, right, trackBottom), 4.0f, 4.0f),
+            panelBrush.Get());
+        const Timestamp dayDuration =
+            activeHistory->range.end - activeHistory->range.start;
+        if (dayDuration <= 0) {
+            throw std::runtime_error("Dashboard received invalid history day bounds");
+        }
+        for (const auto& session : activeHistory->sessions) {
+            const float startRatio = static_cast<float>(
+                static_cast<double>(session.interval.start -
+                                    activeHistory->range.start) /
+                static_cast<double>(dayDuration));
+            const float endRatio = static_cast<float>(
+                static_cast<double>(session.interval.end -
+                                    activeHistory->range.start) /
+                static_cast<double>(dayDuration));
+            const float segmentLeft = left + (right - left) * startRatio;
+            const float segmentRight =
+                std::max(segmentLeft + 2.0f, left + (right - left) * endRatio);
+            renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(segmentLeft, trackTop,
+                                std::min(right, segmentRight), trackBottom),
+                    3.0f, 3.0f),
+                session.active ? cyanBrush.Get() : accentBrush.Get());
+        }
+        constexpr std::array<const wchar_t*, 5> labels{
+            L"00", L"06", L"12", L"18", L"24"};
+        for (std::size_t index = 0; index < labels.size(); ++index) {
+            const Timestamp boundary = localDayHourBoundary(
+                activeHistory->range.start, static_cast<int>(index) * 6);
+            const float ratio = static_cast<float>(
+                static_cast<double>(boundary - activeHistory->range.start) /
+                static_cast<double>(dayDuration));
+            const float x = left + (right - left) * ratio;
+            renderTarget->DrawLine(D2D1::Point2F(x, trackBottom + 3.0f),
+                                   D2D1::Point2F(x, trackBottom + 7.0f),
+                                   mutedBrush.Get(), 0.8f);
+            drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(x - 9.0f, trackBottom + 7.0f, x + 12.0f,
+                                 bounds.bottom - 2.0f));
+        }
+        if (activeHistory->sessions.empty()) {
+            drawText(L"Aucune heure comptabilis\u00e9e", compactNavFormat.Get(),
+                     mutedBrush.Get(),
+                     D2D1::RectF(left, bounds.top + 24.0f, right, trackTop - 2.0f));
+        }
+    }
+
+    void drawHistoryBuckets(D2D1_RECT_F bounds, bool monthCalendar) {
+        drawText(monthCalendar ? L"CALENDRIER DU MOIS"
+                               : (historyPeriod == CalendarPeriod::Year
+                                      ? L"HEURES PAR MOIS"
+                                      : L"HEURES PAR JOUR"),
+                 compactNavFormat.Get(), cyanBrush.Get(),
+                 D2D1::RectF(bounds.left + 8.0f, bounds.top + 4.0f,
+                             bounds.right - 8.0f, bounds.top + 20.0f));
+        const std::size_t count = activeHistory->buckets.size();
+        if (count == 0) {
+            drawText(L"Aucune p\u00e9riode disponible", compactNavFormat.Get(),
+                     mutedBrush.Get(),
+                     D2D1::RectF(bounds.left + 8.0f, bounds.top + 30.0f,
+                                 bounds.right - 8.0f, bounds.bottom - 4.0f));
+            return;
+        }
+
+        if (monthCalendar) {
+            constexpr std::array<const wchar_t*, 7> weekdays{
+                L"Lu", L"Ma", L"Me", L"Je", L"Ve", L"Sa", L"Di"};
+            const float gridLeft = bounds.left + 8.0f;
+            const float gridRight = bounds.right - 8.0f;
+            const float cellWidth = (gridRight - gridLeft) / 7.0f;
+            const float weekdayTop = bounds.top + 25.0f;
+            const float firstDayTop = weekdayTop + 15.0f;
+            const float rowHeight = std::max(
+                13.0f, (bounds.bottom - firstDayTop - 3.0f) / 6.0f);
+            for (std::size_t index = 0; index < weekdays.size(); ++index) {
+                const float center =
+                    gridLeft + (static_cast<float>(index) + 0.5f) * cellWidth;
+                drawText(weekdays[index], compactNavFormat.Get(),
+                         mutedBrush.Get(),
+                         D2D1::RectF(center - 8.0f, weekdayTop,
+                                     center + 8.0f, weekdayTop + 13.0f));
+            }
+            const std::tm firstDay =
+                localTime(static_cast<std::time_t>(
+                    std::chrono::floor<std::chrono::seconds>(
+                        std::chrono::microseconds(
+                            activeHistory->buckets.front().range.start))
+                        .count()));
+            const std::size_t leadingDays =
+                static_cast<std::size_t>((firstDay.tm_wday + 6) % 7);
+            const auto maximum = std::max_element(
+                activeHistory->buckets.begin(), activeHistory->buckets.end(),
+                [](const auto& first, const auto& second) {
+                    return first.duration < second.duration;
+                });
+            const double maxSeconds =
+                maximum == activeHistory->buckets.end() ||
+                        maximum->duration.count() <= 0
+                    ? 1.0
+                    : static_cast<double>(maximum->duration.count());
+            for (std::size_t index = 0; index < count; ++index) {
+                const std::size_t cell = leadingDays + index;
+                const std::size_t row = cell / 7;
+                const std::size_t column = cell % 7;
+                const float cellLeft =
+                    gridLeft + static_cast<float>(column) * cellWidth + 1.0f;
+                const float cellTop =
+                    firstDayTop + static_cast<float>(row) * rowHeight;
+                const D2D1_RECT_F cellBounds =
+                    D2D1::RectF(cellLeft, cellTop, cellLeft + cellWidth - 2.0f,
+                                cellTop + rowHeight - 1.0f);
+                const auto& bucket = activeHistory->buckets[index];
+                const auto card =
+                    D2D1::RoundedRect(cellBounds, 3.0f, 3.0f);
+                renderTarget->FillRoundedRectangle(card, panelHoverBrush.Get());
+                if (bucket.duration.count() > 0) {
+                    accentBrush->SetOpacity(static_cast<float>(
+                        0.18 + 0.65 * static_cast<double>(bucket.duration.count()) /
+                                   maxSeconds));
+                    renderTarget->FillRoundedRectangle(card, accentBrush.Get());
+                    accentBrush->SetOpacity(1.0f);
+                }
+                if (bucket.range.start == selectedHistoryDay) {
+                    renderTarget->DrawRoundedRectangle(card, cyanBrush.Get(), 1.2f);
+                }
+                const std::tm date = localTime(static_cast<std::time_t>(
+                    std::chrono::floor<std::chrono::seconds>(
+                        std::chrono::microseconds(bucket.range.start))
+                        .count()));
+                std::wstring day = std::to_wstring(date.tm_mday);
+                if (bucket.duration.count() > 0) {
+                    day += L" " + formatCompactDuration(bucket.duration);
+                }
+                drawText(day.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                         D2D1::RectF(cellBounds.left + 3.0f, cellBounds.top + 1.0f,
+                                     cellBounds.right - 2.0f,
+                                     cellBounds.bottom - 1.0f));
+                addHistoryHit(cellBounds, 5, static_cast<int>(index));
+            }
+            return;
+        }
+
+        const bool yearly = historyPeriod == CalendarPeriod::Year;
+        const std::size_t columns = yearly ? 4 : 7;
+        const std::size_t rows = (count + columns - 1) / columns;
+        const float chartLeft = bounds.left + 10.0f;
+        const float chartRight = bounds.right - 10.0f;
+        const float chartTop = bounds.top + 27.0f;
+        const float chartBottom = bounds.bottom - 4.0f;
+        const float slotWidth =
+            (chartRight - chartLeft) / static_cast<float>(columns);
+        const float slotHeight =
+            (chartBottom - chartTop) / static_cast<float>(rows);
+        const auto maximum = std::max_element(
+            activeHistory->buckets.begin(), activeHistory->buckets.end(),
+            [](const auto& first, const auto& second) {
+                return first.duration < second.duration;
+            });
+        const double maxSeconds =
+            maximum == activeHistory->buckets.end() ||
+                    maximum->duration.count() <= 0
+                ? 1.0
+                : static_cast<double>(maximum->duration.count());
+        constexpr std::array<const wchar_t*, 12> monthNames{
+            L"Jan", L"F\u00e9v", L"Mar", L"Avr", L"Mai", L"Juin",
+            L"Juil", L"Ao\u00fbt", L"Sep", L"Oct", L"Nov", L"D\u00e9c"};
+        constexpr std::array<const wchar_t*, 7> weekdayNames{
+            L"Lun", L"Mar", L"Mer", L"Jeu", L"Ven", L"Sam", L"Dim"};
+        for (std::size_t index = 0; index < count; ++index) {
+            const std::size_t column = index % columns;
+            const std::size_t row = index / columns;
+            const float slotLeft =
+                chartLeft + static_cast<float>(column) * slotWidth;
+            const float slotTop =
+                chartTop + static_cast<float>(row) * slotHeight;
+            const D2D1_RECT_F slot =
+                D2D1::RectF(slotLeft + 2.0f, slotTop + 1.0f,
+                            slotLeft + slotWidth - 2.0f,
+                            slotTop + slotHeight - 2.0f);
+            renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(slot, 4.0f, 4.0f), panelHoverBrush.Get());
+            const float fraction = static_cast<float>(
+                static_cast<double>(activeHistory->buckets[index]
+                                        .duration.count()) /
+                maxSeconds);
+            if (fraction > 0.0f) {
+                const float barHeight = std::max(3.0f, (slot.bottom - slot.top - 20.0f) *
+                                                         fraction);
+                const float barBottom = slot.bottom - 17.0f;
+                renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(slot.left + 8.0f, barBottom - barHeight,
+                                    slot.right - 8.0f, barBottom),
+                        3.0f, 3.0f),
+                    accentBrush.Get());
+            }
+            const wchar_t* label =
+                yearly ? monthNames[index]
+                       : weekdayNames[static_cast<std::size_t>(
+                             (localTime(static_cast<std::time_t>(
+                                  std::chrono::floor<std::chrono::seconds>(
+                                      std::chrono::microseconds(
+                                          activeHistory->buckets[index]
+                                              .range.start))
+                                      .count()))
+                                  .tm_wday +
+                              6) %
+                             7)];
+            drawText(label, compactNavFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(slot.left + 3.0f, slot.top + 3.0f,
+                                 slot.right - 3.0f, slot.top + 17.0f));
+            if (slot.bottom - slot.top > 40.0f &&
+                activeHistory->buckets[index].duration.count() > 0) {
+                const std::wstring value = formatDuration(
+                    activeHistory->buckets[index].duration);
+                drawText(value.c_str(), compactNavFormat.Get(), mutedBrush.Get(),
+                         D2D1::RectF(slot.left + 3.0f, slot.bottom - 15.0f,
+                                     slot.right - 3.0f, slot.bottom - 2.0f));
+            }
+            addHistoryHit(slot, 5, static_cast<int>(index));
+        }
+    }
+
+    void drawHistorySessions(D2D1_RECT_F bounds) {
+        const TimeRange dayRange =
+            calendarPeriodContaining(selectedHistoryDay, CalendarPeriod::Day);
+        std::size_t matchingCount = 0;
+        for (const auto& session : activeHistory->sessions) {
+            if (std::min(dayRange.end, session.interval.end) >
+                std::max(dayRange.start, session.interval.start)) {
+                ++matchingCount;
+            }
+        }
+        const std::wstring heading =
+            L"SESSIONS DU " + formatHistoryDate(selectedHistoryDay);
+        drawText(heading.c_str(),
+                 compactNavFormat.Get(), cyanBrush.Get(),
+                 D2D1::RectF(bounds.left + 10.0f, bounds.top + 5.0f,
+                             bounds.right - 10.0f, bounds.top + 21.0f));
+        const float headerTop = bounds.top + 25.0f;
+        const float width = bounds.right - bounds.left - 20.0f;
+        const float dateLeft = bounds.left + 10.0f;
+        const float startLeft = dateLeft + width * 0.28f;
+        const float endLeft = dateLeft + width * 0.53f;
+        const float durationLeft = dateLeft + width * 0.77f;
+        renderTarget->DrawLine(D2D1::Point2F(dateLeft, headerTop + 14.0f),
+                               D2D1::Point2F(bounds.right - 10.0f,
+                                              headerTop + 14.0f),
+                               borderBrush.Get(), 0.8f);
+        drawText(L"DATE", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(dateLeft, headerTop, startLeft - 3.0f,
+                             headerTop + 13.0f));
+        drawText(L"D\u00c9BUT", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(startLeft, headerTop, endLeft - 3.0f,
+                             headerTop + 13.0f));
+        drawText(L"FIN", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(endLeft, headerTop, durationLeft - 3.0f,
+                             headerTop + 13.0f));
+        drawText(L"DUR\u00c9E", compactNavFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(durationLeft, headerTop, bounds.right - 8.0f,
+                             headerTop + 13.0f));
+
+        const float rowsTop = headerTop + 18.0f;
+        const float rowHeight = 19.0f;
+        const std::size_t visibleRows =
+            bounds.bottom > rowsTop
+                ? static_cast<std::size_t>((bounds.bottom - rowsTop - 2.0f) /
+                                           rowHeight)
+                : 0;
+        const std::size_t maximumOffset =
+            matchingCount > visibleRows ? matchingCount - visibleRows : 0;
+        sessionScrollOffset = std::min(sessionScrollOffset, maximumOffset);
+        if (matchingCount == 0) {
+            drawText(L"Aucune session comptabilis\u00e9e pour cette date.",
+                     compactNavFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(dateLeft, rowsTop, bounds.right - 10.0f,
+                                 bounds.bottom - 3.0f));
+            return;
+        }
+
+        std::size_t itemIndex = 0;
+        std::size_t rowIndex = 0;
+        for (const auto& session : activeHistory->sessions) {
+            const Timestamp start =
+                std::max(dayRange.start, session.interval.start);
+            const Timestamp end = std::min(dayRange.end, session.interval.end);
+            if (end <= start) {
+                continue;
+            }
+            if (itemIndex++ < sessionScrollOffset) {
+                continue;
+            }
+            if (rowIndex >= visibleRows) {
+                break;
+            }
+            const float rowTop =
+                rowsTop + static_cast<float>(rowIndex++) * rowHeight;
+            const std::wstring date = formatHistoryDate(start);
+            const std::wstring startTime = formatHistoryTime(start);
+            const std::wstring endTime =
+                session.active && end == activeHistory->capturedAt
+                    ? L"En cours"
+                    : formatHistoryTime(end);
+            const std::wstring duration = formatDuration(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::microseconds(end - start)));
+            drawText(date.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(dateLeft, rowTop, startLeft - 3.0f,
+                                 rowTop + rowHeight));
+            drawText(startTime.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(startLeft, rowTop, endLeft - 3.0f,
+                                 rowTop + rowHeight));
+            drawText(endTime.c_str(), compactNavFormat.Get(),
+                     session.active && end == activeHistory->capturedAt
+                         ? cyanBrush.Get()
+                         : textBrush.Get(),
+                     D2D1::RectF(endLeft, rowTop, durationLeft - 3.0f,
+                                 rowTop + rowHeight));
+            drawText(duration.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(durationLeft, rowTop, bounds.right - 8.0f,
+                                 rowTop + rowHeight));
+        }
+    }
+
+    void drawHistory(float left, float right, float top, float bottom) {
+        if (right <= left || bottom <= top) {
+            return;
+        }
+        if (activeHistory == nullptr) {
+            loadHistory(false);
+        }
+        historyHitCount = 0;
+        const float height = bottom - top;
+        const float navHeight = 30.0f;
+        const float summaryHeight = height < 370.0f ? 48.0f : 58.0f;
+        const float detailsHeight = std::min(150.0f, std::max(78.0f, height * 0.34f));
+        const float gap = 7.0f;
+        const float summaryTop = top + navHeight + gap;
+        const float chartTop = summaryTop + summaryHeight + gap;
+        const float detailTop = std::max(chartTop + 55.0f,
+                                         bottom - detailsHeight);
+        const D2D1_RECT_F nav =
+            D2D1::RectF(left, top, right, top + navHeight);
+        const D2D1_RECT_F summary =
+            D2D1::RectF(left, summaryTop, right, summaryTop + summaryHeight);
+        const D2D1_RECT_F chart =
+            D2D1::RectF(left, chartTop, right, detailTop - gap);
+        const D2D1_RECT_F details =
+            D2D1::RectF(left, detailTop, right, bottom);
+        drawHistoryNavigation(nav);
+        drawHistorySummary(summary);
+        drawCard(chart);
+        drawCard(details);
+        if (historyPeriod == CalendarPeriod::Day) {
+            drawHistoryDayTimeline(chart);
+        } else {
+            drawHistoryBuckets(chart, historyPeriod == CalendarPeriod::Month);
+        }
+        drawHistorySessions(details);
     }
 
     D2D1_SIZE_F clientSize() const {
@@ -802,6 +1630,11 @@ struct DashboardWindow::Impl {
                          panelTop + 10.0f, panelBottom - 10.0f);
             return;
         }
+        if (activePage == DashboardPage::History) {
+            drawHistory(contentLeft + 14.0f, contentRight - 14.0f,
+                        panelTop + 10.0f, panelBottom - 10.0f);
+            return;
+        }
 
         const float inset = std::min(36.0f, contentWidth * 0.08f);
         const float textLeft = contentLeft + inset;
@@ -840,6 +1673,11 @@ struct DashboardWindow::Impl {
         focusedPage = index;
         activePage = static_cast<DashboardPage>(index);
         SetFocus(window);
+        if (activePage == DashboardPage::History) {
+            loadHistory(false);
+        } else if (activePage == DashboardPage::Overview) {
+            snapshot = snapshotProvider();
+        }
         render();
     }
 
@@ -863,6 +1701,11 @@ struct DashboardWindow::Impl {
                 static_cast<int>(PageLabels.size());
         }
         activePage = static_cast<DashboardPage>(focusedPage);
+        if (activePage == DashboardPage::History) {
+            loadHistory(false);
+        } else if (activePage == DashboardPage::Overview) {
+            snapshot = snapshotProvider();
+        }
         render();
     }
 
@@ -998,6 +1841,27 @@ struct DashboardWindow::Impl {
             }
             return 0;
         }
+        case WM_NOTIFY: {
+            const auto* notification =
+                reinterpret_cast<const NMHDR*>(lParam);
+            if (notification != nullptr &&
+                notification->hwndFrom == calendarWindow &&
+                notification->code == MCN_SELECT) {
+                const auto* selection =
+                    reinterpret_cast<const NMSELCHANGE*>(lParam);
+                ShowWindow(calendarWindow, SW_HIDE);
+                historyAnchor = timestampFromSystemTime(selection->stSelStart);
+                selectedHistoryDay =
+                    calendarPeriodContaining(historyAnchor,
+                                             CalendarPeriod::Day)
+                        .start;
+                sessionScrollOffset = 0;
+                loadHistory(false);
+                render();
+                return 0;
+            }
+            return DefWindowProcW(hwnd, message, wParam, lParam);
+        }
         case WM_LBUTTONUP: {
             const int x = MulDiv(GET_X_LPARAM(lParam), 96,
                                  static_cast<int>(dpi));
@@ -1006,10 +1870,79 @@ struct DashboardWindow::Impl {
             const int selected = hitTestPage(x, y);
             if (selected >= 0) {
                 selectPage(selected);
+            } else if (activePage == DashboardPage::History) {
+                int value = 0;
+                const int action = hitTestHistory(x, y, value);
+                if (action >= 0) {
+                    applyHistoryAction(action, value);
+                }
             }
             return 0;
         }
+        case WM_MOUSEWHEEL:
+            if (activePage == DashboardPage::History &&
+                activeHistory != nullptr && !activeHistory->sessions.empty()) {
+                const int rows =
+                    std::max(1, std::abs(GET_WHEEL_DELTA_WPARAM(wParam)) /
+                                    WHEEL_DELTA * 3);
+                if (GET_WHEEL_DELTA_WPARAM(wParam) < 0) {
+                    sessionScrollOffset += static_cast<std::size_t>(rows);
+                } else {
+                    sessionScrollOffset =
+                        sessionScrollOffset > static_cast<std::size_t>(rows)
+                            ? sessionScrollOffset -
+                                  static_cast<std::size_t>(rows)
+                            : 0;
+                }
+                render();
+            }
+            return 0;
         case WM_KEYDOWN:
+            if (activePage == DashboardPage::History &&
+                !IsWindowVisible(calendarWindow)) {
+                switch (wParam) {
+                case VK_LEFT:
+                    navigateHistory(-1);
+                    return 0;
+                case VK_RIGHT:
+                    navigateHistory(1);
+                    return 0;
+                case VK_HOME:
+                    historyAnchor = snapshot.capturedAt;
+                    selectedHistoryDay =
+                        calendarPeriodContaining(snapshot.capturedAt,
+                                                 CalendarPeriod::Day)
+                            .start;
+                    sessionScrollOffset = 0;
+                    loadHistory(false);
+                    render();
+                    return 0;
+                case '1':
+                    chooseHistoryPeriod(CalendarPeriod::Day);
+                    return 0;
+                case '2':
+                    chooseHistoryPeriod(CalendarPeriod::Week);
+                    return 0;
+                case '3':
+                    chooseHistoryPeriod(CalendarPeriod::Month);
+                    return 0;
+                case '4':
+                    chooseHistoryPeriod(CalendarPeriod::Year);
+                    return 0;
+                case VK_UP:
+                    if (sessionScrollOffset > 0) {
+                        --sessionScrollOffset;
+                        render();
+                    }
+                    return 0;
+                case VK_DOWN:
+                    ++sessionScrollOffset;
+                    render();
+                    return 0;
+                default:
+                    break;
+                }
+            }
             switch (wParam) {
             case VK_TAB:
             case VK_DOWN:
@@ -1027,8 +1960,13 @@ struct DashboardWindow::Impl {
                 }
                 return 0;
             case VK_ESCAPE:
+                if (IsWindowVisible(calendarWindow)) {
+                    ShowWindow(calendarWindow, SW_HIDE);
+                    return 0;
+                }
                 KillTimer(hwnd, DashboardRefreshTimerId);
                 ShowWindow(hwnd, SW_HIDE);
+                ShowWindow(calendarWindow, SW_HIDE);
                 return 0;
             default:
                 break;
@@ -1043,6 +1981,7 @@ struct DashboardWindow::Impl {
         case WM_CLOSE:
             KillTimer(hwnd, DashboardRefreshTimerId);
             ShowWindow(hwnd, SW_HIDE);
+            ShowWindow(calendarWindow, SW_HIDE);
             return 0;
         case WM_NCDESTROY:
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -1057,9 +1996,11 @@ struct DashboardWindow::Impl {
 };
 
 DashboardWindow::DashboardWindow(ErrorHandler errorHandler,
-                                 SnapshotProvider snapshotProvider)
+                                 SnapshotProvider snapshotProvider,
+                                 HistoryProvider historyProvider)
     : impl_(std::make_unique<Impl>(std::move(errorHandler),
-                                   std::move(snapshotProvider))) {}
+                                   std::move(snapshotProvider),
+                                   std::move(historyProvider))) {}
 
 DashboardWindow::~DashboardWindow() = default;
 
