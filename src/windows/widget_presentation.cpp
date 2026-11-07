@@ -17,7 +17,9 @@ std::wstring formatDayDuration(std::chrono::seconds duration) {
     const auto seconds = nonnegativeSeconds(duration);
     const auto hours = seconds / 3600;
     const auto minutes = (seconds % 3600) / 60;
-    return std::to_wstring(hours) + L" h " + std::to_wstring(minutes) + L" min";
+    const auto remainingSeconds = seconds % 60;
+    return std::to_wstring(hours) + L" h " + std::to_wstring(minutes) +
+           L" min " + std::to_wstring(remainingSeconds) + L" s";
 }
 
 std::wstring formatSessionDuration(std::chrono::seconds duration) {

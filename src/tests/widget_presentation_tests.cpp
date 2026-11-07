@@ -14,13 +14,19 @@ void require(bool condition, std::string_view message) {
     }
 }
 
-void formatsDayDurationWithoutSeconds() {
-    require(chronox::formatDayDuration(std::chrono::seconds{0}) == L"0 h 0 min",
+void formatsAggregateDurationWithSeconds() {
+    require(chronox::formatDayDuration(std::chrono::seconds{0}) ==
+                L"0 h 0 min 0 s",
             "zero day duration");
-    require(chronox::formatDayDuration(std::chrono::seconds{19'647}) == L"5 h 27 min",
-            "day duration includes hours and minutes");
-    require(chronox::formatDayDuration(std::chrono::seconds{-1}) == L"0 h 0 min",
+    require(chronox::formatDayDuration(std::chrono::seconds{19'647}) ==
+                L"5 h 27 min 27 s",
+            "aggregate duration includes hours, minutes, and seconds");
+    require(chronox::formatDayDuration(std::chrono::seconds{-1}) ==
+                L"0 h 0 min 0 s",
             "negative day duration is clamped");
+    require(chronox::formatDayDuration(std::chrono::seconds{4'335}) ==
+                chronox::formatSessionDuration(std::chrono::seconds{4'335}),
+            "aggregate and session durations use the same precision");
 }
 
 void formatsCurrentSessionWithSeconds() {
@@ -75,7 +81,7 @@ void widgetPageNavigationWrapsInBothDirections() {
 } // namespace
 
 int main() {
-    formatsDayDurationWithoutSeconds();
+    formatsAggregateDurationWithSeconds();
     formatsCurrentSessionWithSeconds();
     formatsMonthAndYear();
     widgetPageNavigationWrapsInBothDirections();

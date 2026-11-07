@@ -128,6 +128,7 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
     const Timestamp now = localTime(2024, 6, 15, 12);
     const Timestamp activeStart = localTime(2024, 6, 15, 11, 30);
     database.setCounting(true, activeStart);
+    database.checkpoint(localTime(2024, 6, 15, 11, 45));
     const Timestamp latestRecordedBeforeQuery = database.latestRecordedTimestamp();
     const auto snapshot =
         chronox::queryDashboardSnapshot(database, now, true);
@@ -142,6 +143,10 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
             "year total includes this year's history and excludes the prior year");
     require(snapshot.todayIntervals.size() == 3,
             "today's timeline contains clipped and active counted intervals");
+    const auto todayHistory = chronox::queryDashboardHistory(
+        database, CalendarPeriod::Day, now, now, true);
+    require(snapshot.todayDuration == todayHistory.duration,
+            "overview and history use the same current-time boundary for open intervals");
     require(snapshot.weekDays[0] == 150min &&
                 snapshot.weekDays[1] == 90min &&
                 snapshot.weekDays[4] == 30min &&
@@ -163,7 +168,7 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
                 snapshot.recentSessions[5].duration == 1h,
             "recent session rows retain full starts and durations across Monday");
     require(database.latestRecordedTimestamp() == latestRecordedBeforeQuery,
-            "building the overview does not write or checkpoint SQLite data");
+            "building the overview does not write SQLite data");
 }
 
 std::tm utcTime(std::time_t timestamp) {

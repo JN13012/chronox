@@ -22,15 +22,6 @@ HistoryReport queryHistory(const SessionDatabase& database,
     return database.queryHistory(period, now, now, *converter);
 }
 
-std::chrono::microseconds queryDuration(const SessionDatabase& database,
-                                        CalendarPeriod period, Timestamp now,
-                                        const CalendarTimeConverter* converter) {
-    if (converter == nullptr) {
-        return database.duration(period, now);
-    }
-    return database.duration(period, now, *converter);
-}
-
 TimeRange dayContaining(Timestamp timestamp,
                        const CalendarTimeConverter* converter) {
     if (converter == nullptr) {
@@ -81,14 +72,15 @@ DashboardSnapshot queryDashboardSnapshot(
         queryHistory(database, CalendarPeriod::Day, now, converter);
     const HistoryReport week =
         queryHistory(database, CalendarPeriod::Week, now, converter);
+    const HistoryReport month =
+        queryHistory(database, CalendarPeriod::Month, now, converter);
     const HistoryReport year =
         queryHistory(database, CalendarPeriod::Year, now, converter);
 
     DashboardSnapshot snapshot;
     snapshot.todayDuration = asSeconds(day.sessionDuration);
     snapshot.weekDuration = asSeconds(week.sessionDuration);
-    snapshot.monthDuration =
-        asSeconds(queryDuration(database, CalendarPeriod::Month, now, converter));
+    snapshot.monthDuration = asSeconds(month.sessionDuration);
     snapshot.yearDuration = asSeconds(year.sessionDuration);
     snapshot.todayRange = day.range;
     snapshot.capturedAt = now;

@@ -251,13 +251,15 @@ int runChronox(bool startHidden,
             [&] {
                 const auto now = SessionTracker::Clock::now();
                 const auto timestamp = utcClock.at(now);
+                const auto day = database.queryHistory(
+                    chronox::CalendarPeriod::Day, timestamp, timestamp);
                 const auto week = database.queryHistory(
                     chronox::CalendarPeriod::Week, timestamp, timestamp);
                 const auto month = database.queryHistory(
                     chronox::CalendarPeriod::Month, timestamp, timestamp);
                 return chronox::WidgetSnapshot{
                     std::chrono::duration_cast<std::chrono::seconds>(
-                        database.duration(chronox::CalendarPeriod::Day, timestamp)),
+                        day.sessionDuration),
                     std::chrono::duration_cast<std::chrono::seconds>(
                         tracker->currentSessionElapsed(now)),
                     std::chrono::duration_cast<std::chrono::seconds>(

@@ -72,8 +72,10 @@ std::wstring formatDuration(std::chrono::seconds duration) {
         std::chrono::duration_cast<std::chrono::minutes>(duration).count();
     const auto hours = totalMinutes / 60;
     const auto minutes = totalMinutes % 60;
+    const auto seconds = duration.count() % 60;
     return std::to_wstring(hours) + L" h " +
-           (minutes < 10 ? L"0" : L"") + std::to_wstring(minutes) + L" min";
+           (minutes < 10 ? L"0" : L"") + std::to_wstring(minutes) + L" min " +
+           std::to_wstring(seconds) + L" s";
 }
 
 std::wstring formatCompactDuration(std::chrono::seconds duration) {
