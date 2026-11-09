@@ -14,7 +14,7 @@
 namespace chronox {
 namespace {
 
-constexpr int CurrentSchemaVersion = 1;
+constexpr int CurrentSchemaVersion = 2;
 std::atomic<std::uint64_t> backupSequence{};
 
 std::runtime_error databaseError(sqlite3* database, const char* operation) {
@@ -113,16 +113,12 @@ private:
 } // namespace
 
 struct SessionDatabase::Impl {
-    explicit Impl(const std::filesystem::path& path) {
+    explicit Impl(const std::filesystem::path& path, StorageMode selected) : mode(selected) {
         databasePath = path;
-#if defined(_WIN32)
-        const int result = sqlite3_open16(path.c_str(), &database);
-#else
-        const int result = sqlite3_open_v2(path.c_str(), &database,
-                                           SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
-                                               SQLITE_OPEN_FULLMUTEX,
-                                           nullptr);
-#endif
+        const auto encoded = path.u8string();
+        const int flags = mode == StorageMode::ReadOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+        const int result = sqlite3_open_v2(reinterpret_cast<const char*>(encoded.c_str()), &database,
+                                         flags | SQLITE_OPEN_FULLMUTEX, nullptr);
         if (result != SQLITE_OK) {
             const std::string message = database == nullptr
                                             ? "Unable to open SQLite database"
@@ -137,10 +133,14 @@ struct SessionDatabase::Impl {
                   "sqlite3_busy_timeout");
             execute(database, "PRAGMA foreign_keys = ON");
             verifyIntegrity();
-            execute(database, "PRAGMA journal_mode = DELETE");
-            execute(database, "PRAGMA synchronous = FULL");
+            if (mode == StorageMode::ReadOnly) execute(database, "PRAGMA query_only=ON");
+            else {
+                execute(database, "PRAGMA journal_mode = DELETE");
+                execute(database, "PRAGMA synchronous = FULL");
+            }
             migrate();
-            recoverInterruptedInterval();
+            if (mode == StorageMode::Measured) execute(database, "UPDATE measured_spans SET active=0 WHERE active=1");
+            else if (mode == StorageMode::Legacy && !hasMeasured) recoverInterruptedInterval();
         } catch (...) {
             sqlite3_close(database);
             database = nullptr;
@@ -169,7 +169,14 @@ struct SessionDatabase::Impl {
         if (version > CurrentSchemaVersion) {
             throw std::runtime_error("Chronox database schema is newer than this version");
         }
-        if (version == CurrentSchemaVersion) {
+        hasMeasured = version == 2;
+        if (mode == StorageMode::ReadOnly) {
+            if (version == 0) throw std::runtime_error("Not a Chronox database");
+            return;
+        }
+        if (version == 2) return;
+        if (version == 1) {
+            if (mode == StorageMode::Measured) migrateMeasured();
             return;
         }
 
@@ -194,6 +201,32 @@ struct SessionDatabase::Impl {
                 "ON session_intervals(ended_at_us)");
         execute(database, "PRAGMA user_version = 1");
         transaction.commit();
+        if (mode == StorageMode::Measured) migrateMeasured();
+    }
+
+    void migrateMeasured() {
+        Transaction tx(database);
+        execute(database, "CREATE TABLE temporal_runs(id INTEGER PRIMARY KEY, started_utc_us INTEGER NOT NULL)");
+        execute(database, "CREATE TABLE measured_spans("
+            "run_id INTEGER NOT NULL REFERENCES temporal_runs(id), seq INTEGER NOT NULL,"
+            "epoch INTEGER NOT NULL, session INTEGER NOT NULL, utc_start INTEGER NOT NULL, utc_end INTEGER NOT NULL,"
+            "mono_start INTEGER NOT NULL, mono_end INTEGER NOT NULL, duration_us INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN(0,1)),"
+            "PRIMARY KEY(run_id,seq), CHECK(mono_end>=mono_start), CHECK(duration_us=mono_end-mono_start),"
+            "CHECK(utc_end>=utc_start), CHECK(utc_end-utc_start=duration_us))");
+        execute(database, "CREATE UNIQUE INDEX one_measured_active ON measured_spans((1)) WHERE active=1");
+        execute(database, "CREATE INDEX measured_civil_end ON measured_spans(utc_end)");
+        execute(database, "CREATE TRIGGER measured_no_overlap_insert BEFORE INSERT ON measured_spans "
+            "WHEN EXISTS(SELECT 1 FROM measured_spans WHERE run_id=NEW.run_id AND seq<>NEW.seq "
+            "AND mono_start<NEW.mono_end AND mono_end>NEW.mono_start) BEGIN SELECT RAISE(ABORT,'monotonic overlap'); END");
+        execute(database, "CREATE TRIGGER measured_no_overlap_update BEFORE UPDATE ON measured_spans "
+            "WHEN EXISTS(SELECT 1 FROM measured_spans WHERE run_id=NEW.run_id AND seq<>NEW.seq "
+            "AND mono_start<NEW.mono_end AND mono_end>NEW.mono_start) BEGIN SELECT RAISE(ABORT,'monotonic overlap'); END");
+        execute(database, "CREATE TRIGGER measured_no_regression BEFORE UPDATE ON measured_spans "
+            "WHEN NEW.duration_us<OLD.duration_us OR NEW.mono_start<>OLD.mono_start OR NEW.utc_start<>OLD.utc_start "
+            "OR NEW.epoch<>OLD.epoch OR NEW.session<>OLD.session OR (OLD.active=0 AND (NEW.duration_us<>OLD.duration_us OR NEW.active<>0)) "
+            "BEGIN SELECT RAISE(ABORT,'measured checkpoint regression'); END");
+        execute(database, "PRAGMA user_version=2");
+        tx.commit(); hasMeasured = true;
     }
 
     void verifyIntegrity() {
@@ -345,19 +378,25 @@ struct SessionDatabase::Impl {
         }
     }
 
+    StorageMode mode;
+    bool hasMeasured{};
+    Timestamp run{};
+    const TemporalEngine* owner{};
+    std::optional<MeasuredSpan> live;
     sqlite3* database{};
     std::filesystem::path databasePath;
     std::optional<std::int64_t> activeInterval;
 };
 
-SessionDatabase::SessionDatabase(const std::filesystem::path& path)
-    : impl_(std::make_unique<Impl>(path)) {}
+SessionDatabase::SessionDatabase(const std::filesystem::path& path, StorageMode mode)
+    : impl_(std::make_unique<Impl>(path, mode)) {}
 
 SessionDatabase::~SessionDatabase() = default;
 SessionDatabase::SessionDatabase(SessionDatabase&&) noexcept = default;
 SessionDatabase& SessionDatabase::operator=(SessionDatabase&&) noexcept = default;
 
 void SessionDatabase::setCounting(bool counting, Timestamp timestamp) {
+    if (impl_->mode != StorageMode::Legacy || impl_->hasMeasured) throw std::logic_error("Legacy writes are disabled for measured/read-only storage");
     if (counting == impl_->activeInterval.has_value()) {
         return;
     }
@@ -394,6 +433,7 @@ void SessionDatabase::setCounting(bool counting, Timestamp timestamp) {
 }
 
 void SessionDatabase::checkpoint(Timestamp timestamp) {
+    if (impl_->mode != StorageMode::Legacy || impl_->hasMeasured) throw std::logic_error("Legacy writes are disabled for measured/read-only storage");
     if (!impl_->activeInterval.has_value()) {
         return;
     }
@@ -404,6 +444,92 @@ void SessionDatabase::checkpoint(Timestamp timestamp) {
     update.bind(timestamp, 1);
     update.bind(*impl_->activeInterval, 2);
     update.step();
+}
+
+void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable) {
+    if (impl_->mode != StorageMode::Measured) throw std::logic_error("Measured writer required");
+    if (impl_->owner && impl_->owner != &engine) throw std::logic_error("One engine per database writer");
+    impl_->owner = &engine;
+    if (durable || !engine.pending().empty() || !impl_->run) {
+        Transaction tx(impl_->database);
+        if (!impl_->run) {
+            Statement q(impl_->database, "INSERT INTO temporal_runs(started_utc_us) VALUES(?1)");
+            q.bind(engine.snapshot().utc, 1); q.step();
+        }
+        const Timestamp run = impl_->run ? impl_->run : sqlite3_last_insert_rowid(impl_->database);
+        const auto save = [&](const MeasuredSpan& span) {
+            Statement q(impl_->database, "INSERT INTO measured_spans VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) "
+                "ON CONFLICT(run_id,seq) DO UPDATE SET utc_end=excluded.utc_end,mono_end=excluded.mono_end,"
+                "duration_us=excluded.duration_us,active=excluded.active");
+            const Timestamp values[]{run,span.sequence,span.epoch,span.session,span.utcStart,span.utcEnd,
+                span.monoStart,span.monoEnd,span.duration,span.active ? 1 : 0};
+            for (int i=0;i<10;++i) q.bind(values[i],i+1);
+            q.step();
+        };
+        for (const auto& span : engine.pending()) save(span);
+        if (engine.current()) save(*engine.current());
+        tx.commit(); impl_->run = run; engine.acknowledge();
+    }
+    impl_->live = engine.current();
+}
+
+std::chrono::microseconds contributionWithin(const SessionContribution& c, TimeRange range) {
+    const auto span = c.interval.end-c.interval.start;
+    if (span <= 0) return {};
+    const auto from = std::clamp(range.start-c.interval.start, Timestamp{0}, span);
+    const auto to = std::clamp(range.end-c.interval.start, Timestamp{0}, span);
+    if (to <= from) return {};
+    // V2 currently maps each epoch at unit rate. Cumulative apportionment also
+    // conserves the total if a future source supplies a calibrated civil rate.
+    const auto prefix = [&](Timestamp offset) -> Timestamp {
+        if (offset == span) return c.duration.count();
+        if (c.duration.count() == span) return offset;
+        return static_cast<Timestamp>(static_cast<long double>(c.duration.count()) * offset / span);
+    };
+    return std::chrono::microseconds(prefix(to)-prefix(from));
+}
+
+HistoryReport SessionDatabase::queryMeasuredHistory(TimeRange range, CalendarPeriod period,
+    const CalendarTimeConverter* converter) const {
+    HistoryReport report{period,range};
+    const auto append = [&](SessionContribution c) {
+        const auto duration = contributionWithin(c,range);
+        if (duration.count() <= 0) return;
+        c.interval = {std::max(c.interval.start,range.start),std::min(c.interval.end,range.end)};
+        c.duration = duration;
+        report.sessionDuration += duration;
+        report.contributions.push_back(c);
+    };
+    Statement legacy(impl_->database, "SELECT started_at_us,COALESCE(ended_at_us,checkpoint_at_us) "
+        "FROM session_intervals WHERE started_at_us<?2 AND COALESCE(ended_at_us,checkpoint_at_us)>?1 ORDER BY started_at_us,id");
+    legacy.bind(range.start,1); legacy.bind(range.end,2);
+    while (legacy.step()==SQLITE_ROW) {
+        const auto start=legacy.integer(0), end=legacy.integer(1);
+        append({{start,end},std::chrono::microseconds(end-start),false,0});
+    }
+    if (impl_->hasMeasured) {
+        Statement q(impl_->database, "SELECT run_id,seq,utc_start,utc_end,duration_us,active,epoch "
+            "FROM measured_spans WHERE utc_end>?1 AND utc_start<?2 ORDER BY utc_start,run_id,seq");
+        q.bind(range.start,1);q.bind(range.end,2);
+        while(q.step()==SQLITE_ROW) {
+            if(impl_->live && q.integer(0)==impl_->run && q.integer(1)==impl_->live->sequence) continue;
+            append({{q.integer(2),q.integer(3)},std::chrono::microseconds(q.integer(4)),
+                impl_->mode==StorageMode::Measured && q.integer(5)!=0,q.integer(6)});
+        }
+        if(impl_->live) {
+            const auto& s=*impl_->live;
+            append({{s.utcStart,s.utcEnd},std::chrono::microseconds(s.duration),true,s.epoch});
+        }
+    }
+    std::stable_sort(report.contributions.begin(),report.contributions.end(),[](const auto& a,const auto& b){return a.interval.start<b.interval.start;});
+    for(const auto& c:report.contributions) report.sessionIntervals.push_back(c.interval);
+    for (Timestamp day=range.start; day<range.end;) {
+        const auto bounds=converter ? calendarPeriodContaining(day,CalendarPeriod::Day,*converter) : calendarPeriodContaining(day,CalendarPeriod::Day);
+        if(bounds.end<=day) throw std::runtime_error("Invalid calendar day");
+        if(std::any_of(report.contributions.begin(),report.contributions.end(),[&](const auto& c){return contributionWithin(c,bounds).count()>0;})) ++report.daysWithDuration;
+        day=bounds.end;
+    }
+    return report;
 }
 
 void SessionDatabase::backupTo(
@@ -454,6 +580,8 @@ HistoryReport SessionDatabase::queryHistory(TimeRange range,
                                             CalendarPeriod period,
                                             Timestamp now,
                                             const CalendarTimeConverter* converter) const {
+    if (impl_->hasMeasured || impl_->mode == StorageMode::ReadOnly)
+        return queryMeasuredHistory(range,period,converter);
     const Timestamp effectiveEnd = std::min(range.end, now);
     Statement query(
         impl_->database,
@@ -476,6 +604,8 @@ HistoryReport SessionDatabase::queryHistory(TimeRange range,
         }
         report.sessionIntervals.push_back({start, end});
         report.sessionDuration += std::chrono::microseconds(end - start);
+        report.contributions.push_back({{start,end},std::chrono::microseconds(end-start),
+            impl_->activeInterval.has_value() && end == now,0});
     }
 
     Timestamp dayStart = range.start;

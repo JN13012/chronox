@@ -1,6 +1,7 @@
 #pragma once
 
 #include "calendar_period.h"
+#include "temporal_engine.h"
 
 #include <chrono>
 #include <cstddef>
@@ -11,6 +12,15 @@
 
 namespace chronox {
 
+enum class StorageMode { Legacy, Measured, ReadOnly };
+struct SessionContribution {
+    TimeRange interval;
+    std::chrono::microseconds duration{};
+    bool active{};
+    Timestamp epoch{};
+};
+std::chrono::microseconds contributionWithin(const SessionContribution&, TimeRange);
+
 struct HistoryReport {
     CalendarPeriod period;
     TimeRange range;
@@ -18,11 +28,12 @@ struct HistoryReport {
     std::vector<TimeRange> sessionIntervals;
     std::size_t daysWithDuration{};
     std::optional<std::chrono::microseconds> declaredWorkDuration;
+    std::vector<SessionContribution> contributions;
 };
 
 class SessionDatabase {
 public:
-    explicit SessionDatabase(const std::filesystem::path& path);
+    explicit SessionDatabase(const std::filesystem::path& path, StorageMode mode = StorageMode::Legacy);
     ~SessionDatabase();
 
     SessionDatabase(const SessionDatabase&) = delete;
@@ -32,6 +43,8 @@ public:
 
     void setCounting(bool counting, Timestamp timestamp);
     void checkpoint(Timestamp timestamp);
+    // Commits pending boundaries atomically; otherwise refreshes RAM only.
+    void updateTemporal(TemporalEngine& engine, bool durable);
     void backupTo(const std::filesystem::path& destination) const;
     Timestamp latestRecordedTimestamp() const;
     std::chrono::microseconds duration(CalendarPeriod period, Timestamp now) const;
@@ -47,6 +60,7 @@ public:
                                const CalendarTimeConverter& converter) const;
 
 private:
+    HistoryReport queryMeasuredHistory(TimeRange, CalendarPeriod, const CalendarTimeConverter*) const;
     std::chrono::microseconds duration(TimeRange range, Timestamp now) const;
     HistoryReport queryHistory(TimeRange range,
                                CalendarPeriod period,
