@@ -623,7 +623,7 @@ struct DashboardWindow::Impl {
                                      D2D1::Point2F(left + 6.0f, statusY + 8.0f),
                                      4.0f, 4.0f),
                                  statusColor);
-        drawText(snapshot.trackingActive ? L"SUIVI ACTIF" : L"SUIVI INACTIF",
+        drawText(snapshot.timeUncertain ? L"MESURE INCERTAINE" : (snapshot.trackingActive ? L"SUIVI ACTIF" : L"SUIVI INACTIF"),
                  compactNavFormat.Get(), statusColor,
                  D2D1::RectF(left + 18.0f, statusY, right, statusY + 18.0f));
 
@@ -902,6 +902,7 @@ struct DashboardWindow::Impl {
         if (activeHistory->capturedAt >= snapshot.capturedAt) {
             snapshot.capturedAt = activeHistory->capturedAt;
             snapshot.trackingActive = activeHistory->trackingActive;
+            snapshot.timeUncertain = activeHistory->timeUncertain;
         }
     }
 

@@ -64,6 +64,16 @@ int main(){try {
     bool rejected=false;try{SessionDatabase bad(failed,StorageMode::Measured);}catch(const std::exception&){rejected=true;}
     check(rejected,"migration failure rejected");
     {Sql q(failed);check(q.scalar("PRAGMA user_version")=="1","migration rolls back version");check(q.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='temporal_runs'")=="0","migration rolls back new tables");check(q.scalar(rowsSql)==before,"failed migration preserves rows");}
+    const auto uncertainFile=t.file("uncertain.db");
+    {
+        SessionDatabase db(uncertainFile,StorageMode::Measured);
+        TemporalEngine e(false,{base,0,0});db.updateTemporal(e,true);
+        e.observe({base+3600'000'000,3600'000'000,0});db.updateTemporal(e,true);
+        check(e.snapshot().uncertain && db.uncertaintyCount()==1,"missing power evidence is flagged and durable");
+        e.observe({base+3601'000'000,3601'000'000,1'000'000});db.updateTemporal(e,true);
+        check(e.snapshot().elapsed==0 && e.snapshot().uncertain,"no silent resume after uncertain power state");
+    }
+    {SessionDatabase db(uncertainFile,StorageMode::ReadOnly);check(db.uncertaintyCount()==1,"uncertainty survives restart");}
     std::cout<<"V1/V2 migration, recovery, backup and invariants passed\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

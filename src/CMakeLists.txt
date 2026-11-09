@@ -3,6 +3,7 @@ add_library(chronox_core
    core/session_tracker.cpp
    core/utc_timestamp_clock.cpp
    core/temporal_engine.cpp
+   core/temporal_diagnostics.cpp
 )
 target_include_directories(chronox_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core
@@ -89,6 +90,9 @@ if(WIN32)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(chronox_temporal_diagnostics_tests tests/temporal_diagnostics_tests.cpp)
+    target_link_libraries(chronox_temporal_diagnostics_tests PRIVATE chronox_core)
+    add_test(NAME chronox_temporal_diagnostics_tests COMMAND chronox_temporal_diagnostics_tests)
     add_executable(chronox_temporal_scenarios ../scripts/diagnostics/temporal-sync/temporal_sync_tests.cpp)
     target_link_libraries(chronox_temporal_scenarios PRIVATE chronox_storage)
     foreach(scenario baseline forward backward midnight midnight-offset sleep-qpc-advances sleep-qpc-pauses resume-forward resume-backward restart restart-future duplicates)

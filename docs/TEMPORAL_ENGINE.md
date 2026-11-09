@@ -21,3 +21,18 @@ dates appear future after a clock rollback. No extrapolation of inactive data.
 
 Only temporary fixtures/copies may be migrated or recovered during validation.
 Installation and real database migration require separate explicit permission.
+
+## Opt-in observability
+
+`CHRONOX_TIME_DIAGNOSTICS=1` enables the future process's local
+`time-diagnostics/time-status.json` and `time-events[.1].jsonl` beside its data.
+Default: no diagnostic I/O. Two event files capped at 256 KiB each, 128 in-memory
+frames, at most 16 logged events/second and one status publication/second when
+samples arrive. No extra periodic timer or worker thread. Direct internal and
+Windows UTC values, QPC/awake counters, epoch, correction/uncertainty counts,
+counting state and dropped events are exposed. I/O failure disables the sink
+without interrupting measurement. No SQL or application commands are accepted.
+Uncertainty counts are also durable run metadata, even with logging disabled;
+widget/dashboard indicate `Mesure incertaine`. Only an explicit power resume
+or user unlock can reconcile an uncertain awake state; a timer/WTS query alone
+cannot establish the missing power evidence. Hardware remains NOT TESTED.

@@ -45,6 +45,7 @@ public:
     void checkpoint(Timestamp timestamp);
     // Commits pending boundaries atomically; otherwise refreshes RAM only.
     void updateTemporal(TemporalEngine& engine, bool durable);
+    Timestamp uncertaintyCount() const;
     void backupTo(const std::filesystem::path& destination) const;
     Timestamp latestRecordedTimestamp() const;
     std::chrono::microseconds duration(CalendarPeriod period, Timestamp now) const;

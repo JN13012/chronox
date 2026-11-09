@@ -8,6 +8,7 @@
 #include "../core/calendar_period.h"
 #include "windows_time_source.h"
 #include "../core/temporal_engine.h"
+#include "../core/temporal_diagnostics.h"
 #include "../storage/session_database.h"
 
 #include <windows.h>
@@ -155,9 +156,13 @@ int runChronox(bool startHidden,
     bool stopped = false;
     chronox::SessionDatabase database(databasePath(), chronox::StorageMode::Measured);
     chronox::WidgetPreferences widgetPreferences;
+    wchar_t diagnosticFlag[2]{};
+    const bool diagnosticEnabled=GetEnvironmentVariableW(L"CHRONOX_TIME_DIAGNOSTICS",diagnosticFlag,2)==1 && diagnosticFlag[0]==L'1';
+    chronox::TemporalDiagnostics diagnostics(diagnosticEnabled ? databasePath().parent_path()/L"time-diagnostics" : std::filesystem::path{});
     const auto observe = [&] {
         engine->observe(chronox::sampleWindowsTime());
         database.updateTemporal(*engine, false);
+        diagnostics.record(engine->snapshot(),"sample");
         return engine->snapshot();
     };
     std::unique_ptr<chronox::ChronoxWidget> widget;
@@ -166,7 +171,7 @@ int runChronox(bool startHidden,
         if (stopped) {
             return;
         }
-        if (engine) { engine->stop(chronox::sampleWindowsTime()); database.updateTemporal(*engine, true); }
+        if (engine) { engine->stop(chronox::sampleWindowsTime()); database.updateTemporal(*engine, true); diagnostics.record(engine->snapshot(),"stop"); }
         stopped = true;
     };
 
@@ -218,6 +223,7 @@ int runChronox(bool startHidden,
                     engine->reconcile(chronox::WindowsSessionMonitor::queryInitiallyLocked(), chronox::sampleWindowsTime());
                 }
                 database.updateTemporal(*engine, true);
+                diagnostics.record(engine->snapshot(), event==SessionEvent::Suspended ? "suspended" : event==SessionEvent::Resumed ? "resumed" : event==SessionEvent::Locked ? "locked" : "unlocked");
                 if (widget != nullptr) {
                     widget->refresh();
                 }
@@ -232,6 +238,7 @@ int runChronox(bool startHidden,
                 if (!engine) return;
                 engine->observe(chronox::sampleWindowsTime());
                 database.updateTemporal(*engine, true);
+                diagnostics.record(engine->snapshot(),"checkpoint");
                 if (widget != nullptr) {
                     widget->refresh();
                 }
@@ -241,7 +248,7 @@ int runChronox(bool startHidden,
             }
         },
         [&] {
-            try { if (engine) { observe(); database.updateTemporal(*engine, true); } }
+            try { if (engine) { observe(); database.updateTemporal(*engine, true); diagnostics.record(engine->snapshot(),"time-change"); } }
             catch (...) { captureError(std::current_exception()); }
         });
 
@@ -249,6 +256,7 @@ int runChronox(bool startHidden,
     const bool initiallyLocked = chronox::WindowsSessionMonitor::queryInitiallyLocked();
     engine.emplace(initiallyLocked, chronox::sampleWindowsTime());
     database.updateTemporal(*engine, true);
+    diagnostics.record(engine->snapshot(),"startup");
 
     try {
         widget = std::make_unique<chronox::ChronoxWidget>(
@@ -272,7 +280,7 @@ int runChronox(bool startHidden,
                     std::chrono::duration_cast<std::chrono::seconds>(
                         month.sessionDuration),
                     currentMonthLabel(timestamp),
-                    state.counting, state.uncertainties != 0};
+                    state.counting, database.uncertaintyCount() != 0};
             },
             stop,
             [&] { windowCoordinator.openDashboard(); },

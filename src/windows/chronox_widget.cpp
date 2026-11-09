@@ -579,7 +579,7 @@ struct ChronoxWidget::Impl {
 
         if (currentPage == WidgetPage::Today) {
             const auto status =
-                snapshot.timeUncertain ? L"Temps incertain - voir diagnostic" : (snapshot.counting ? L"Suivi actif" : L"Suivi en pause");
+                snapshot.timeUncertain ? L"Mesure incertaine" : (snapshot.counting ? L"Suivi actif" : L"Suivi en pause");
             drawText(status, statusFormat.Get(),
                      snapshot.counting ? activeBrush.Get() : mutedBrush.Get(),
                      D2D1::RectF(54.0f, 143.0f, 196.0f, 157.0f));

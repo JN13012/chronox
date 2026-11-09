@@ -139,6 +139,9 @@ struct SessionDatabase::Impl {
                 execute(database, "PRAGMA synchronous = FULL");
             }
             migrate();
+            if (hasMeasured) {
+                Statement q(database,"SELECT COALESCE(SUM(uncertainty_count),0) FROM temporal_runs");q.step();priorUncertainties=q.integer(0);
+            }
             if (mode == StorageMode::Measured) execute(database, "UPDATE measured_spans SET active=0 WHERE active=1");
             else if (mode == StorageMode::Legacy && !hasMeasured) recoverInterruptedInterval();
         } catch (...) {
@@ -206,7 +209,7 @@ struct SessionDatabase::Impl {
 
     void migrateMeasured() {
         Transaction tx(database);
-        execute(database, "CREATE TABLE temporal_runs(id INTEGER PRIMARY KEY, started_utc_us INTEGER NOT NULL)");
+        execute(database, "CREATE TABLE temporal_runs(id INTEGER PRIMARY KEY, started_utc_us INTEGER NOT NULL, uncertainty_count INTEGER NOT NULL DEFAULT 0 CHECK(uncertainty_count>=0))");
         execute(database, "CREATE TABLE measured_spans("
             "run_id INTEGER NOT NULL REFERENCES temporal_runs(id), seq INTEGER NOT NULL,"
             "epoch INTEGER NOT NULL, session INTEGER NOT NULL, utc_start INTEGER NOT NULL, utc_end INTEGER NOT NULL,"
@@ -380,7 +383,7 @@ struct SessionDatabase::Impl {
 
     StorageMode mode;
     bool hasMeasured{};
-    Timestamp run{};
+    Timestamp run{}, priorUncertainties{}, liveUncertainties{};
     const TemporalEngine* owner{};
     std::optional<MeasuredSpan> live;
     sqlite3* database{};
@@ -450,6 +453,7 @@ void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable) {
     if (impl_->mode != StorageMode::Measured) throw std::logic_error("Measured writer required");
     if (impl_->owner && impl_->owner != &engine) throw std::logic_error("One engine per database writer");
     impl_->owner = &engine;
+    impl_->liveUncertainties = engine.snapshot().uncertainties;
     if (durable || !engine.pending().empty() || !impl_->run) {
         Transaction tx(impl_->database);
         if (!impl_->run) {
@@ -468,9 +472,15 @@ void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable) {
         };
         for (const auto& span : engine.pending()) save(span);
         if (engine.current()) save(*engine.current());
+        Statement quality(impl_->database,"UPDATE temporal_runs SET uncertainty_count=?1 WHERE id=?2");
+        quality.bind(engine.snapshot().uncertainties,1);quality.bind(run,2);quality.step();
         tx.commit(); impl_->run = run; engine.acknowledge();
     }
     impl_->live = engine.current();
+}
+
+Timestamp SessionDatabase::uncertaintyCount() const {
+    return impl_->priorUncertainties + impl_->liveUncertainties;
 }
 
 std::chrono::microseconds contributionWithin(const SessionContribution& c, TimeRange range) {

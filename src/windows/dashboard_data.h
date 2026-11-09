@@ -27,6 +27,7 @@ struct DashboardSnapshot {
     std::array<std::chrono::seconds, 7> weekDays{};
     std::vector<DashboardSession> recentSessions;
     bool trackingActive{};
+    bool timeUncertain{};
 };
 
 struct DashboardHistoryBucket {
@@ -44,6 +45,7 @@ struct DashboardHistorySnapshot {
     std::vector<DashboardHistoryBucket> buckets;
     std::vector<DashboardSession> sessions;
     bool trackingActive{};
+    bool timeUncertain{};
 };
 
 DashboardSnapshot queryDashboardSnapshot(

@@ -86,6 +86,7 @@ DashboardSnapshot queryDashboardSnapshot(
     snapshot.capturedAt = now;
     snapshot.todayIntervals = day.sessionIntervals;
     snapshot.trackingActive = trackingActive;
+    snapshot.timeUncertain = database.uncertaintyCount()!=0;
 
     Timestamp dayStart = week.range.start;
     for (std::size_t index = 0; index < snapshot.weekDays.size(); ++index) {
@@ -141,6 +142,7 @@ DashboardHistorySnapshot queryDashboardHistory(
     snapshot.duration = asSeconds(report.sessionDuration);
     snapshot.daysWithActivity = report.daysWithDuration;
     snapshot.trackingActive = trackingActive;
+    snapshot.timeUncertain = database.uncertaintyCount()!=0;
     snapshot.sessions.reserve(report.sessionIntervals.size());
     for (std::size_t index = 0; index < report.sessionIntervals.size(); ++index) {
         const TimeRange interval = report.sessionIntervals[index];
