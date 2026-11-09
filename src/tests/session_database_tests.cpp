@@ -699,9 +699,24 @@ void daylightSavingUsesLocalCalendarBoundaries() {
 #endif
 }
 
+void measuredSessionsRespectBothDstDays() {
+    const chronox::CalendarTimeConverter converter{easternLocalTime,easternTimestamp};
+    for(const auto entry : {std::pair{utcTimestamp(2024,3,10,12),23},std::pair{utcTimestamp(2024,11,3,12),25}}){
+        TemporaryDatabase file;
+        const auto day=chronox::calendarPeriodContaining(toMicroseconds(entry.first),CalendarPeriod::Day,converter);
+        SessionDatabase db(file.path(),chronox::StorageMode::Measured);
+        chronox::TemporalEngine engine(false,{day.start,0,0});db.updateTemporal(engine,true);
+        const auto d=day.end-day.start;
+        engine.stop({day.end,d,d});db.updateTemporal(engine,true);
+        const auto report=db.queryHistory(CalendarPeriod::Day,day.start,day.end,converter);
+        require(report.sessionDuration==std::chrono::hours(entry.second),"V2 measured durations respect 23/25 hour DST days");
+    }
+}
+
 } // namespace
 
 int main() {
+    measuredSessionsRespectBothDstDays();
     transitionsAreDurableAndIdempotent();
     interruptedIntervalsStopAtTheirLastCheckpoint();
     onlineBackupsAreCompleteAndDoNotModifyTheSource();

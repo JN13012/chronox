@@ -29,17 +29,25 @@ des extensions d’interface décrites dans la [spécification UI](./UI_SPEC.md)
 - Le compteur tourne uniquement lorsque `déverrouillée && éveillée`.
 - Il s’arrête sur verrouillage ou entrée en veille et reprend uniquement lorsque
   les deux conditions sont de nouveau réunies.
-- Les transitions et points de sauvegarde sont horodatés à partir d’une horloge
-  monotone ancrée à l’heure UTC au lancement. Les ajustements de l’horloge
-  système pendant l’exécution ne produisent pas de durées négatives.
+- Le moteur V2 sépare le compteur monotone d’éveil, l’UTC civile Windows et le
+  calendrier local. Les durées ne proviennent jamais d’une soustraction des
+  heures système. Une correction UTC ouvre une époque distincte : ses dates
+  civiles peuvent se recouvrir avec les précédentes, sans double comptage des
+  durées monotones. Voir [TEMPORAL_ENGINE.md](./TEMPORAL_ENGINE.md).
+- Une période dont l’état d’éveil est incertain suspend le suivi et signale
+  « Mesure incertaine ». Elle est exclue sans estimation silencieuse ; seule
+  une reprise ou un déverrouillage explicite permet de réconcilier l’état.
 - Le temps de veille, verrouillé et hors exécution n’est jamais compté.
 - Au lancement, WTS (`WTSSessionInfoEx`) fournit l’état de verrouillage de la
   session courante. Le processus démarre éveillé puisqu’il est en cours
   d’exécution. Une erreur de lecture WTS est signalée et empêche un démarrage
   avec un état supposé.
-- Les intervalles fermés sont enregistrés dans
-  `%LOCALAPPDATA%\Chronox\chronox.db`, en UTC, dans des transactions SQLite.
-  Une contrainte d’unicité n’autorise qu’un seul intervalle ouvert.
+- Les données restent dans `%LOCALAPPDATA%\Chronox\chronox.db`. Le schéma V2
+  ajoute `temporal_runs` et `measured_spans`, avec durée mesurée et coordonnées
+  civiles séparées, sans réécrire `session_intervals` V1. La lecture V1/V2 est
+  prise en charge ; un ancien binaire refuse la V2. Les transactions et contraintes
+  interdisent les doubles contributions et les chevauchements monotones d’une
+  exécution. Un historique futur ne décale pas l’UTC actuelle.
 - À l’ouverture, `PRAGMA quick_check` vérifie la cohérence de la base avant
   migration ou récupération. Une erreur est signalée sans réparation ni
   remplacement automatique du fichier ; la récupération documentée ci-dessous
@@ -174,3 +182,10 @@ validés par une exécution Linux :
 
 Ces scénarios de verrouillage, veille et arrêt sur un vrai PC Windows ne sont
 pas validés par les seuls tests automatisés ou la CI.
+
+## État de livraison du moteur temporel V2
+
+Le moteur V2 est compilé et validé sur bases temporaires, sans installation ni
+migration de la base utilisateur. Le passage sur les données réelles reste
+soumis à autorisation explicite après qualification. Le rapport de validation
+est [TEMPORAL_ENGINE_RESULTS.md](./TEMPORAL_ENGINE_RESULTS.md).

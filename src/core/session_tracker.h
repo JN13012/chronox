@@ -31,6 +31,8 @@ private:
     bool awake_{true};
     Duration accumulated_{};
     TimePoint countingSince_{};
+    TimePoint lastEvent_{};
+    void validate(TimePoint at) const;
 
     void updateCounting(bool wasCounting, TimePoint at);
 };

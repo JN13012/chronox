@@ -1,15 +1,18 @@
 #include "session_tracker.h"
+#include <stdexcept>
 
 namespace chronox {
 
 SessionTracker::SessionTracker(bool initiallyLocked, TimePoint startedAt)
-    : locked_(initiallyLocked) {
+    : locked_(initiallyLocked), lastEvent_(startedAt) {
     if (!locked_) {
         countingSince_ = startedAt;
     }
 }
 
 bool SessionTracker::apply(SessionEvent event, TimePoint at) {
+    validate(at);
+    lastEvent_=at;
     const bool wasLocked = locked_;
     const bool wasAwake = awake_;
     const bool wasCounting = isCounting();
@@ -38,6 +41,7 @@ bool SessionTracker::apply(SessionEvent event, TimePoint at) {
 }
 
 SessionTracker::Duration SessionTracker::elapsed(TimePoint at) const {
+    validate(at);
     if (isCounting()) {
         return accumulated_ + (at - countingSince_);
     }
@@ -45,11 +49,16 @@ SessionTracker::Duration SessionTracker::elapsed(TimePoint at) const {
 }
 
 SessionTracker::Duration SessionTracker::currentSessionElapsed(TimePoint at) const {
+    validate(at);
     return isCounting() ? at - countingSince_ : Duration{};
 }
 
 bool SessionTracker::isLocked() const noexcept {
     return locked_;
+}
+
+void SessionTracker::validate(TimePoint at) const {
+    if(at<lastEvent_) throw std::invalid_argument("Session event time regressed");
 }
 
 bool SessionTracker::isAwake() const noexcept {

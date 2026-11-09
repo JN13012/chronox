@@ -74,6 +74,42 @@ int main(){try {
         check(e.snapshot().elapsed==0 && e.snapshot().uncertain,"no silent resume after uncertain power state");
     }
     {SessionDatabase db(uncertainFile,StorageMode::ReadOnly);check(db.uncertaintyCount()==1,"uncertainty survives restart");}
+    {
+        const auto failedWrite=t.file("failed-checkpoint.db");
+        SessionDatabase db(failedWrite,StorageMode::Measured);
+        TemporalEngine e(false,{base,0,0});db.updateTemporal(e,true);
+        e.stop({base+10'000'000,10'000'000,10'000'000});
+        {Sql q(failedWrite);check(q.execute("CREATE TRIGGER injected_failure BEFORE UPDATE ON measured_spans BEGIN SELECT RAISE(ABORT,'fixture failure'); END"),"failure fixture");}
+        bool failed=false;try{db.updateTemporal(e,true);}catch(const std::runtime_error&){failed=true;}
+        check(failed&&!e.pending().empty(),"failed durable write preserves pending accounting");
+        {Sql q(failedWrite);check(q.scalar("SELECT SUM(duration_us) FROM measured_spans")=="0","failed checkpoint rolls back");check(q.execute("DROP TRIGGER injected_failure"),"remove fixture failure");}
+        e.stop({base+10'000'000,10'000'000,10'000'000});
+        db.updateTemporal(e,true);db.updateTemporal(e,true);
+        {Sql q(failedWrite);check(q.scalar("SELECT SUM(duration_us) FROM measured_spans")=="10000000","retry persists exactly once");}
+    }
+    {
+        const auto randomFile=t.file("random.db");
+        SessionDatabase db(randomFile,StorageMode::Measured);
+        TimeSample sample{base,0,0};TemporalEngine e(false,sample);db.updateTemporal(e,true);
+        bool locked=false,asleep=false;Timestamp expected=0;unsigned random=12345;
+        for(int i=0;i<10000;++i){
+            random=random*1664525u+1013904223u;
+            const Timestamp delta=1000+(random%100000);
+            sample.utc+=delta;sample.steady+=delta;if(!asleep)sample.awake+=delta;
+            if(!locked&&!asleep)expected+=delta;
+            if(random%7==0)sample.utc+=(random&1?1:-1)*120'000'000LL;
+            const auto event=static_cast<SessionEvent>((random>>8)%4);
+            e.event(event,sample);
+            switch(event){case SessionEvent::Locked:locked=true;break;case SessionEvent::Unlocked:locked=false;break;
+                case SessionEvent::Suspended:asleep=true;break;case SessionEvent::Resumed:asleep=false;break;}
+            check(e.snapshot().elapsed==expected,"random transitions preserve physical awake/unlocked duration");
+            if(i%100==0)db.updateTemporal(e,true);
+        }
+        e.stop(sample);db.updateTemporal(e,true);
+        Sql q(randomFile);
+        check(q.scalar("SELECT COALESCE(SUM(duration_us),0) FROM measured_spans")==std::to_string(expected),"every measured microsecond persisted exactly once");
+        check(q.scalar("SELECT COUNT(*) FROM measured_spans a JOIN measured_spans b ON a.run_id=b.run_id AND a.seq<b.seq AND a.mono_start<b.mono_end AND a.mono_end>b.mono_start")=="0","no monotonic overlaps after random corrections");
+    }
     std::cout<<"V1/V2 migration, recovery, backup and invariants passed\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

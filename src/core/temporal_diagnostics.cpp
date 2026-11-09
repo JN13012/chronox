@@ -3,7 +3,9 @@
 #include <fstream>
 #include <sstream>
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 namespace chronox {
@@ -32,6 +34,7 @@ void TemporalDiagnostics::record(const TemporalSnapshot& s, std::string_view rea
         out<<"{\"reason\":\""<<label<<"\",\"internal_utc_us\":"<<s.utc
            <<",\"windows_utc_us\":"<<s.sample.utc<<",\"offset_us\":"<<s.utc-s.sample.utc
            <<",\"steady_us\":"<<s.sample.steady<<",\"awake_us\":"<<s.sample.awake
+           <<",\"sample_uncertainty_us\":"<<s.sample.uncertainty
            <<",\"elapsed_us\":"<<s.elapsed<<",\"epoch\":"<<s.epoch
            <<",\"corrections\":"<<s.corrections<<",\"uncertainties\":"<<s.uncertainties
            <<",\"uncertain\":"<<(s.uncertain?"true":"false")

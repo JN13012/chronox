@@ -1,5 +1,6 @@
 #include "temporal_engine.h"
 #include <cstdlib>
+#include <algorithm>
 #include <stdexcept>
 
 namespace chronox {
@@ -10,6 +11,11 @@ Timestamp us(SessionTracker::Duration d) {
 }
 TemporalEngine::TemporalEngine(bool locked, TimeSample initial)
     : last_(initial), tracker_(locked, logical_) {
+    if(initial.uncertainty<0) throw std::invalid_argument("Invalid sample uncertainty");
+    if(initial.uncertainty>100'000) {
+        tracker_.apply(SessionEvent::Suspended,logical_);
+        uncertain_=true; ++uncertainties_;
+    }
     if (tracker_.isCounting()) { ++session_; open(); }
 }
 void TemporalEngine::open() {
@@ -26,10 +32,12 @@ void TemporalEngine::close() {
 void TemporalEngine::observe(TimeSample s) {
     if (stopped_) throw std::logic_error("Temporal engine is stopped");
     const Timestamp ds = s.steady - last_.steady, da = s.awake - last_.awake;
-    if (ds < 0 || da < 0) throw std::invalid_argument("Monotonic counter regressed");
+    if (ds < 0 || da < 0 || s.uncertainty < 0) throw std::invalid_argument("Invalid monotonic sample");
     // A missing power transition, or impossible counter pair, cannot silently
     // turn the unobserved interval into active time. Exclude it and latch doubt.
-    const bool gap = tracker_.isAwake() && (ds - da > 100'000 || da - ds > 100'000);
+    const Timestamp tolerance=std::max<Timestamp>(2'000,last_.uncertainty+s.uncertainty);
+    const bool gap = tracker_.isAwake() &&
+        (ds-da>tolerance || da-ds>tolerance || s.uncertainty>100'000);
     if (gap) {
         close();
         tracker_.apply(SessionEvent::Suspended, logical_);
@@ -73,6 +81,7 @@ void TemporalEngine::reconcile(bool locked, TimeSample s) {
     event(locked ? SessionEvent::Locked : SessionEvent::Unlocked, s);
 }
 void TemporalEngine::stop(TimeSample s) {
+    if(stopped_) return; // A failed durable transaction may be retried safely.
     observe(s); close(); tracker_.apply(SessionEvent::Locked, logical_); stopped_ = true;
 }
 TemporalSnapshot TemporalEngine::snapshot() const {

@@ -344,9 +344,26 @@ void historyBucketsRespectDstDayLengths() {
             "daily history uses the real 23-hour DST calendar day");
 }
 
+void measuredOverlapsUseExplicitDurationAndActiveIdentity() {
+    TemporaryDatabase file;
+    SessionDatabase db(file.path(),chronox::StorageMode::Measured);
+    const auto start=localTime(2024,6,15,12);
+    chronox::TemporalEngine e(false,{start,0,0});db.updateTemporal(e,true);
+    e.observe({start+durationTicks(10min),durationTicks(10min),durationTicks(10min)});
+    e.observe({start+durationTicks(5min),durationTicks(10min),durationTicks(10min)});db.updateTemporal(e,true);
+    e.observe({start+durationTicks(15min),durationTicks(20min),durationTicks(20min)});db.updateTemporal(e,false);
+    const auto snapshot=chronox::queryDashboardSnapshot(db,e.snapshot().utc,true);
+    const auto history=chronox::queryDashboardHistory(db,CalendarPeriod::Day,start,e.snapshot().utc,true);
+    require(snapshot.todayDuration==20min && history.duration==20min && history.buckets.front().duration==20min,
+        "overlapping civil epochs preserve measured contributions in every view");
+    require(snapshot.recentSessions.front().active && snapshot.recentSessions.front().duration==10min,
+        "active identity survives civil rollback");
+}
+
 } // namespace
 
 int main() {
+    measuredOverlapsUseExplicitDurationAndActiveIdentity();
     emptyDatabaseProducesEmptyOverview();
     periodsSessionsAndCrossMidnightAreAggregatedFromHistory();
     weeklyAggregationUsesLocalDstDayBoundaries();

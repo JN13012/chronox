@@ -36,3 +36,25 @@ Uncertainty counts are also durable run metadata, even with logging disabled;
 widget/dashboard indicate `Mesure incertaine`. Only an explicit power resume
 or user unlock can reconcile an uncertain awake state; a timer/WTS query alone
 cannot establish the missing power evidence. Hardware remains NOT TESTED.
+
+## Read precision and accounting boundaries
+
+Samples include the QPC bracket width as measurement uncertainty. A difference
+between elapsed QPC and awake time exceeding max(2 ms, the sum of both bracket
+uncertainties) latches doubt. A read taking more than 100 ms is also
+uncertain. These bounds are detection tolerances, not a claim of exact hardware
+sleep reconstruction. Explicit suspend events exclude sleep without that
+threshold. Ordinary civil geometry uses unit-rate measured spans; an accumulated
+UTC residual above 50 ms starts a new epoch at the observation boundary. Civil
+`now` always remains the directly sampled UTC. Past dates are not retroactively
+corrected. Per-day totals may legitimately change day when the civil clock moves
+back across midnight; the total measured duration never becomes negative.
+
+Measured mode freezes the V1 durable interpretation, including interrupted rows.
+ReadOnly opens SQLite with READONLY + query_only and never migrates/recovers.
+Legacy mode remains for V1 fixtures/compatibility; writes through that API are
+rejected on V2. New application code explicitly selects Measured. Checkpoints
+upsert the active span rather than append one row per frame/minute. Epoch IDs
+are stored in spans; run IDs distinguish counters across restarts. Failed writes
+retain pending spans and can be retried idempotently. Status files carry their
+capture counters: consumers must show their age, not treat old frames as live.

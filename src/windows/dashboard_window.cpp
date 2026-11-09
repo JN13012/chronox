@@ -705,8 +705,7 @@ struct DashboardWindow::Impl {
             const Timestamp start =
                 std::max(interval.start, snapshot.todayRange.start);
             const Timestamp end = std::min(
-                interval.end, std::min(snapshot.capturedAt,
-                                       snapshot.todayRange.end));
+                interval.end, snapshot.todayRange.end);
             if (end <= start) {
                 continue;
             }

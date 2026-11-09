@@ -10,6 +10,9 @@ struct WindowsSessionMonitorTestAccess {
     static void dispatch(WindowsSessionMonitor& monitor, UINT message, WPARAM value) {
         monitor.handleMessage(nullptr,message,value,0);
     }
+    static bool powerRegistered(const WindowsSessionMonitor& monitor) {
+        return monitor.powerNotification_!=nullptr;
+    }
     static HWND createWindow(WindowsSessionMonitor& monitor) {
         return monitor.createWindow();
     }
@@ -74,5 +77,9 @@ int main() {
     chronox::WindowsSessionMonitorTestAccess::dispatch(monitor,WM_POWERBROADCAST,PBT_APMRESUMEAUTOMATIC);
     chronox::WindowsSessionMonitorTestAccess::dispatch(monitor,WM_POWERBROADCAST,PBT_APMRESUMESUSPEND);
     require(changes==1 && suspends==1 && resumes==2,"synthetic power/time notifications delivered");
+    monitor.start();
+    require(chronox::WindowsSessionMonitorTestAccess::powerRegistered(monitor),"native power registration succeeds");
+    chronox::WindowsSessionMonitorTestAccess::destroyWindow(monitor);
+    require(!chronox::WindowsSessionMonitorTestAccess::powerRegistered(monitor),"native power registration cleaned up");
     std::cout << "All Windows session monitor tests passed.\n";
 }

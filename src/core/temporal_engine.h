@@ -7,7 +7,7 @@
 namespace chronox {
 // All counters are microseconds. steady includes sleep; awake excludes it.
 // Inject the entire sample in tests; never read a host clock in this class.
-struct TimeSample { Timestamp utc{}, steady{}, awake{}; };
+struct TimeSample { Timestamp utc{}, steady{}, awake{}, uncertainty{}; };
 struct MeasuredSpan {
     Timestamp sequence{}, epoch{}, session{};
     Timestamp utcStart{}, utcEnd{}, monoStart{}, monoEnd{}, duration{};

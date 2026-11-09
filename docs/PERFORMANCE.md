@@ -1,5 +1,22 @@
 # Audit des performances et protocole Windows
 
+## Moteur temporel V2 — validation locale du 9 novembre 2026
+
+Le banc natif isolé compare les sources d6db29d à V2, avec SQLite 3.54.1 et
+bases temporaires. À 1 Hz, deux passages de 30 s par variante : CPU pondéré
+0,154 % d'un cœur pour la référence, 0,103 % pour V2 sans diagnostic et
+0,488 % avec diagnostic ; mémoire privée maximale du banc 1,059 / 1,055 /
+1,004 Mio respectivement. Ces faibles différences par défaut sont sensibles
+au bruit ; elles ne prouvent pas un gain CPU/RAM du produit. Le budget proposé
+de +0,1 point CPU / +2 Mio est respecté dans ce banc uniquement.
+
+Le coût p95 du noyau seul est 0,1 µs pour la référence et 0,3 µs pour V2.
+Sur 100 000 lignes anciennes, les quatre rapports ont une médiane de 99,2–133,7 ms
+contre 0,946–1,089 ms après choix explicite des index et parcours des jours actifs.
+Le rendu, le démarrage et la migration utilisateur ne sont pas mesurés. Aucun
+déploiement n'a été effectué ; matériel de veille/reprise NON TESTÉ.
+Méthode, limites et preuves : [TEMPORAL_ENGINE_RESULTS.md](./TEMPORAL_ENGINE_RESULTS.md).
+
 ## Résultats effectivement mesurés
 
 Le prototype P1 a été configuré, compilé et exécuté sous Windows en MSVC

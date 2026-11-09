@@ -105,7 +105,7 @@ void utcTimestampsKeepMicrosecondPrecision() {
             "steady-clock durations convert to UTC microseconds");
 }
 
-void utcTimestampsRemainMonotonicAcrossClockAdjustments() {
+void utcTimestampsFollowCivilClockAdjustments() {
     const auto start = chronox::UtcTimestampClock::TimePoint{};
     constexpr chronox::Timestamp utcStart = 1'800'000'000'000'000;
     chronox::UtcTimestampClock clock(start, utcStart);
@@ -116,7 +116,7 @@ void utcTimestampsRemainMonotonicAcrossClockAdjustments() {
             "civil timestamps follow a backward correction; durations use the tracker");
 }
 
-void utcTimestampsReanchorAfterResumeAndDatabaseRestart() {
+void utcProjectionUsesExplicitEpochAnchors() {
     const auto start = chronox::UtcTimestampClock::TimePoint{};
     constexpr chronox::Timestamp utcStart = 1'800'000'000'000'000;
     chronox::UtcTimestampClock clock(start, utcStart);
@@ -125,7 +125,7 @@ void utcTimestampsReanchorAfterResumeAndDatabaseRestart() {
             "resume reanchors using elapsed UTC microseconds");
     clock.reanchor(start + 2h, utcStart + 7'200'000'000);
     require(clock.at(start + 2h + 500ms) == utcStart + 7'200'500'000,
-            "restart reanchors after the last persisted interval");
+            "an explicit civil epoch anchor is used without a historical floor");
 }
 
 void currentSessionContinuesAcrossMidnightAndRestartsFresh() {
@@ -153,8 +153,8 @@ int main() {
     wakingWhileLockedDoesNotResumeCounting();
     sleepAndWakeWhileLockedDoNotAddTime();
     utcTimestampsKeepMicrosecondPrecision();
-    utcTimestampsRemainMonotonicAcrossClockAdjustments();
-    utcTimestampsReanchorAfterResumeAndDatabaseRestart();
+    utcTimestampsFollowCivilClockAdjustments();
+    utcProjectionUsesExplicitEpochAnchors();
     currentSessionContinuesAcrossMidnightAndRestartsFresh();
     std::cout << "All session tracker tests passed.\n";
 }

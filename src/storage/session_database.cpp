@@ -10,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <set>
 
 namespace chronox {
 namespace {
@@ -510,8 +511,9 @@ HistoryReport SessionDatabase::queryMeasuredHistory(TimeRange range, CalendarPer
         report.sessionDuration += duration;
         report.contributions.push_back(c);
     };
-    Statement legacy(impl_->database, "SELECT started_at_us,COALESCE(ended_at_us,checkpoint_at_us) "
-        "FROM session_intervals WHERE started_at_us<?2 AND COALESCE(ended_at_us,checkpoint_at_us)>?1 ORDER BY started_at_us,id");
+    Statement legacy(impl_->database, "SELECT started_at_us,ended_at_us FROM session_intervals INDEXED BY session_intervals_by_end WHERE ended_at_us>?1 AND started_at_us<?2 "
+        "UNION ALL SELECT started_at_us,checkpoint_at_us FROM session_intervals INDEXED BY one_open_session_interval "
+        "WHERE ended_at_us IS NULL AND checkpoint_at_us>?1 AND started_at_us<?2 ORDER BY 1");
     legacy.bind(range.start,1); legacy.bind(range.end,2);
     while (legacy.step()==SQLITE_ROW) {
         const auto start=legacy.integer(0), end=legacy.integer(1);
@@ -531,14 +533,18 @@ HistoryReport SessionDatabase::queryMeasuredHistory(TimeRange range, CalendarPer
             append({{s.utcStart,s.utcEnd},std::chrono::microseconds(s.duration),true,s.epoch});
         }
     }
-    std::stable_sort(report.contributions.begin(),report.contributions.end(),[](const auto& a,const auto& b){return a.interval.start<b.interval.start;});
+    std::stable_sort(report.contributions.begin(),report.contributions.end(),[](const auto& a,const auto& b){if(a.active!=b.active) return !a.active; return a.interval.start<b.interval.start;});
     for(const auto& c:report.contributions) report.sessionIntervals.push_back(c.interval);
-    for (Timestamp day=range.start; day<range.end;) {
-        const auto bounds=converter ? calendarPeriodContaining(day,CalendarPeriod::Day,*converter) : calendarPeriodContaining(day,CalendarPeriod::Day);
-        if(bounds.end<=day) throw std::runtime_error("Invalid calendar day");
-        if(std::any_of(report.contributions.begin(),report.contributions.end(),[&](const auto& c){return contributionWithin(c,bounds).count()>0;})) ++report.daysWithDuration;
-        day=bounds.end;
+    std::set<Timestamp> occupiedDays;
+    for (const auto& contribution : report.contributions) {
+        for (Timestamp day=contribution.interval.start; day<contribution.interval.end;) {
+            const auto bounds=converter ? calendarPeriodContaining(day,CalendarPeriod::Day,*converter) : calendarPeriodContaining(day,CalendarPeriod::Day);
+            if(bounds.end<=day) throw std::runtime_error("Invalid calendar day");
+            if(contributionWithin(contribution,bounds).count()>0) occupiedDays.insert(bounds.start);
+            day=bounds.end;
+        }
     }
+    report.daysWithDuration=occupiedDays.size();
     return report;
 }
 
