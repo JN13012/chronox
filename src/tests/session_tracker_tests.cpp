@@ -112,8 +112,8 @@ void utcTimestampsRemainMonotonicAcrossClockAdjustments() {
     require(clock.at(start + 5s) == utcStart + 5'000'000,
             "monotonic elapsed time advances the UTC timestamp");
     clock.reanchor(start + 10s, utcStart - 100'000'000);
-    require(clock.at(start + 11s) == utcStart + 6'000'000,
-            "a backward wall-clock adjustment cannot move timestamps backward");
+    require(clock.at(start + 11s) == utcStart - 99'000'000,
+            "civil timestamps follow a backward correction; durations use the tracker");
 }
 
 void utcTimestampsReanchorAfterResumeAndDatabaseRestart() {

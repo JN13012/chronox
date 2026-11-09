@@ -6,7 +6,8 @@
 #include "dashboard_data.h"
 
 #include "../core/calendar_period.h"
-#include "../core/utc_timestamp_clock.h"
+#include "windows_time_source.h"
+#include "../core/temporal_engine.h"
 #include "../storage/session_database.h"
 
 #include <windows.h>
@@ -149,21 +150,23 @@ int runChronox(bool startHidden,
     SingleInstanceGuard instanceGuard(quietIfAlreadyRunning);
     ComApartment comApartment;
 
-    std::optional<SessionTracker> tracker;
+    std::optional<chronox::TemporalEngine> engine;
     std::exception_ptr callbackError;
     bool stopped = false;
-    chronox::UtcTimestampClock utcClock;
-    chronox::SessionDatabase database(databasePath());
+    chronox::SessionDatabase database(databasePath(), chronox::StorageMode::Measured);
     chronox::WidgetPreferences widgetPreferences;
-    utcClock.alignWithPersistedTime(database.latestRecordedTimestamp());
+    const auto observe = [&] {
+        engine->observe(chronox::sampleWindowsTime());
+        database.updateTemporal(*engine, false);
+        return engine->snapshot();
+    };
     std::unique_ptr<chronox::ChronoxWidget> widget;
 
     const auto closeActiveInterval = [&] {
         if (stopped) {
             return;
         }
-        const auto now = SessionTracker::Clock::now();
-        database.setCounting(false, utcClock.at(now));
+        if (engine) { engine->stop(chronox::sampleWindowsTime()); database.updateTemporal(*engine, true); }
         stopped = true;
     };
 
@@ -174,22 +177,22 @@ int runChronox(bool startHidden,
         PostQuitMessage(1);
     };
     const auto provideDashboardSnapshot = [&] {
-        if (!tracker.has_value()) {
+        if (!engine.has_value()) {
             throw std::logic_error("Session tracker is not initialized");
         }
-        const auto now = SessionTracker::Clock::now();
+        const auto state = observe();
         return chronox::queryDashboardSnapshot(
-            database, utcClock.at(now), tracker->isCounting());
+            database, state.utc, state.counting);
     };
     const auto provideDashboardHistory =
         [&](chronox::CalendarPeriod period, chronox::Timestamp anchor) {
-            if (!tracker.has_value()) {
+            if (!engine.has_value()) {
                 throw std::logic_error("Session tracker is not initialized");
             }
-            const auto now = SessionTracker::Clock::now();
+            const auto state = observe();
             return chronox::queryDashboardHistory(
-                database, period, anchor, utcClock.at(now),
-                tracker->isCounting());
+                database, period, anchor, state.utc,
+                state.counting);
         };
     chronox::WindowCoordinator windowCoordinator(
         captureError, provideDashboardSnapshot, provideDashboardHistory);
@@ -208,15 +211,13 @@ int runChronox(bool startHidden,
     chronox::WindowsSessionMonitor monitor(
         [&](SessionEvent event) {
             try {
-                const auto now = SessionTracker::Clock::now();
-                if (!tracker->apply(event, now)) {
-                    return;
+                if (!engine) return;
+                engine->event(event, chronox::sampleWindowsTime());
+                if (event == SessionEvent::Resumed ||
+                    (event == SessionEvent::Unlocked && engine->snapshot().uncertain)) {
+                    engine->reconcile(chronox::WindowsSessionMonitor::queryInitiallyLocked(), chronox::sampleWindowsTime());
                 }
-                if (event == SessionEvent::Resumed) {
-                    utcClock.reanchorAfterResume(now);
-                }
-                const auto timestamp = utcClock.at(now);
-                database.setCounting(tracker->isCounting(), timestamp);
+                database.updateTemporal(*engine, true);
                 if (widget != nullptr) {
                     widget->refresh();
                 }
@@ -228,9 +229,9 @@ int runChronox(bool startHidden,
         stop,
         [&] {
             try {
-                const auto now = SessionTracker::Clock::now();
-                const auto timestamp = utcClock.at(now);
-                database.checkpoint(timestamp);
+                if (!engine) return;
+                engine->observe(chronox::sampleWindowsTime());
+                database.updateTemporal(*engine, true);
                 if (widget != nullptr) {
                     widget->refresh();
                 }
@@ -238,19 +239,22 @@ int runChronox(bool startHidden,
             } catch (...) {
                 captureError(std::current_exception());
             }
+        },
+        [&] {
+            try { if (engine) { observe(); database.updateTemporal(*engine, true); } }
+            catch (...) { captureError(std::current_exception()); }
         });
 
     monitor.start();
     const bool initiallyLocked = chronox::WindowsSessionMonitor::queryInitiallyLocked();
-    const auto start = SessionTracker::Clock::now();
-    tracker.emplace(initiallyLocked, start);
-    database.setCounting(tracker->isCounting(), utcClock.at(start));
+    engine.emplace(initiallyLocked, chronox::sampleWindowsTime());
+    database.updateTemporal(*engine, true);
 
     try {
         widget = std::make_unique<chronox::ChronoxWidget>(
             [&] {
-                const auto now = SessionTracker::Clock::now();
-                const auto timestamp = utcClock.at(now);
+                const auto state = observe();
+                const auto timestamp = state.utc;
                 const auto day = database.queryHistory(
                     chronox::CalendarPeriod::Day, timestamp, timestamp);
                 const auto week = database.queryHistory(
@@ -261,14 +265,14 @@ int runChronox(bool startHidden,
                     std::chrono::duration_cast<std::chrono::seconds>(
                         day.sessionDuration),
                     std::chrono::duration_cast<std::chrono::seconds>(
-                        tracker->currentSessionElapsed(now)),
+                        std::chrono::microseconds(state.continuous)),
                     std::chrono::duration_cast<std::chrono::seconds>(
                         week.sessionDuration),
                     week.daysWithDuration,
                     std::chrono::duration_cast<std::chrono::seconds>(
                         month.sessionDuration),
                     currentMonthLabel(timestamp),
-                    tracker->isCounting()};
+                    state.counting, state.uncertainties != 0};
             },
             stop,
             [&] { windowCoordinator.openDashboard(); },

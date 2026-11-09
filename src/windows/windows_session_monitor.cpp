@@ -20,9 +20,9 @@ std::runtime_error windowsError(const char* operation, DWORD error) {
 } // namespace
 
 WindowsSessionMonitor::WindowsSessionMonitor(EventHandler onEvent, StopHandler onStop,
-                                             TickHandler onTick)
+                                             TickHandler onTick, TickHandler onTimeChange)
     : onEvent_(std::move(onEvent)), onStop_(std::move(onStop)),
-      onTick_(std::move(onTick)) {}
+      onTick_(std::move(onTick)), onTimeChange_(std::move(onTimeChange)) {}
 
 WindowsSessionMonitor::~WindowsSessionMonitor() {
     if (window_ != nullptr && IsWindow(window_)) {
@@ -88,6 +88,13 @@ void WindowsSessionMonitor::start() {
     }
     registeredForSessionNotifications_ = true;
 
+    powerNotification_ = RegisterSuspendResumeNotification(window, DEVICE_NOTIFY_WINDOW_HANDLE);
+    if (!powerNotification_) {
+        const auto error = GetLastError();
+        releaseWindowResources(window); destroyWindow();
+        throw windowsError("RegisterSuspendResumeNotification", error);
+    }
+
     if (SetTimer(window, TimerId, 60'000, nullptr) == 0) {
         const DWORD error = GetLastError();
         releaseWindowResources(window_);
@@ -139,6 +146,7 @@ void WindowsSessionMonitor::destroyWindow() {
 }
 
 void WindowsSessionMonitor::releaseWindowResources(HWND window) {
+    if (powerNotification_) { UnregisterSuspendResumeNotification(powerNotification_); powerNotification_=nullptr; }
     if (window == nullptr || !IsWindow(window)) {
         registeredForSessionNotifications_ = false;
         timerSet_ = false;
@@ -196,6 +204,9 @@ LRESULT CALLBACK WindowsSessionMonitor::windowProcedure(HWND window, UINT messag
 LRESULT WindowsSessionMonitor::handleMessage(HWND window, UINT message,
                                              WPARAM wParam, LPARAM lParam) {
     switch (message) {
+    case WM_TIMECHANGE:
+        if (onTimeChange_) onTimeChange_();
+        return 0;
     case WM_WTSSESSION_CHANGE:
         if (wParam == WTS_SESSION_LOCK) {
             onEvent_(SessionEvent::Locked);

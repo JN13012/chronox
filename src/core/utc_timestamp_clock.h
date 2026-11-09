@@ -6,6 +6,8 @@
 
 namespace chronox {
 
+// Civil projection inside an explicit epoch; UTC may decrease on reanchor.
+// Duration/non-overlap guarantees belong to TemporalEngine and storage.
 class UtcTimestampClock {
 public:
     using SteadyClock = std::chrono::steady_clock;
@@ -24,8 +26,7 @@ private:
 
     TimePoint steadyAnchor_;
     Timestamp utcAnchor_{};
-    Timestamp lastTimestamp_{};
-    bool hasLastTimestamp_{};
+
 };
 
 } // namespace chronox

@@ -14,7 +14,8 @@ public:
     using StopHandler = std::function<void()>;
     using TickHandler = std::function<void()>;
 
-    WindowsSessionMonitor(EventHandler onEvent, StopHandler onStop, TickHandler onTick);
+    WindowsSessionMonitor(EventHandler onEvent, StopHandler onStop, TickHandler onTick,
+                          TickHandler onTimeChange = {});
     ~WindowsSessionMonitor();
 
     WindowsSessionMonitor(const WindowsSessionMonitor&) = delete;
@@ -37,6 +38,8 @@ private:
     EventHandler onEvent_;
     StopHandler onStop_;
     TickHandler onTick_;
+    TickHandler onTimeChange_;
+    HPOWERNOTIFY powerNotification_{};
     bool registeredForSessionNotifications_{};
     bool timerSet_{};
 };

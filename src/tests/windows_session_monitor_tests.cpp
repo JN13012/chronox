@@ -7,6 +7,9 @@
 namespace chronox {
 
 struct WindowsSessionMonitorTestAccess {
+    static void dispatch(WindowsSessionMonitor& monitor, UINT message, WPARAM value) {
+        monitor.handleMessage(nullptr,message,value,0);
+    }
     static HWND createWindow(WindowsSessionMonitor& monitor) {
         return monitor.createWindow();
     }
@@ -62,5 +65,14 @@ void createsAndDestroysHiddenWindowWithoutSessionRegistration() {
 
 int main() {
     createsAndDestroysHiddenWindowWithoutSessionRegistration();
+    int changes=0, suspends=0, resumes=0;
+    chronox::WindowsSessionMonitor monitor(
+        [&](chronox::SessionEvent e){if(e==chronox::SessionEvent::Suspended) ++suspends;
+            if(e==chronox::SessionEvent::Resumed) ++resumes;}, []{}, []{}, [&]{++changes;});
+    chronox::WindowsSessionMonitorTestAccess::dispatch(monitor,WM_TIMECHANGE,0);
+    chronox::WindowsSessionMonitorTestAccess::dispatch(monitor,WM_POWERBROADCAST,PBT_APMSUSPEND);
+    chronox::WindowsSessionMonitorTestAccess::dispatch(monitor,WM_POWERBROADCAST,PBT_APMRESUMEAUTOMATIC);
+    chronox::WindowsSessionMonitorTestAccess::dispatch(monitor,WM_POWERBROADCAST,PBT_APMRESUMESUSPEND);
+    require(changes==1 && suspends==1 && resumes==2,"synthetic power/time notifications delivered");
     std::cout << "All Windows session monitor tests passed.\n";
 }

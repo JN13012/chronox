@@ -97,13 +97,7 @@ DashboardSnapshot queryDashboardSnapshot(
         }
 
         std::chrono::microseconds duration{};
-        for (const auto& interval : week.sessionIntervals) {
-            const Timestamp start = std::max(dayStart, interval.start);
-            const Timestamp end = std::min(dayEnd, interval.end);
-            if (end > start) {
-                duration += std::chrono::microseconds(end - start);
-            }
-        }
+        for (const auto& contribution : week.contributions) duration += contributionWithin(contribution,{dayStart,dayEnd});
         snapshot.weekDays[index] = asSeconds(duration);
         dayStart = dayEnd;
     }
@@ -121,11 +115,11 @@ DashboardSnapshot queryDashboardSnapshot(
     for (std::size_t index = year.sessionIntervals.size();
          index > firstRecent; --index) {
         const TimeRange interval = year.sessionIntervals[index - 1];
-        const bool active = trackingActive && interval.end == now &&
-                            index == year.sessionIntervals.size();
+        const auto& contribution = year.contributions[index - 1];
+        const bool active = trackingActive && contribution.active;
         snapshot.recentSessions.push_back(
             {interval,
-             asSeconds(std::chrono::microseconds(interval.end - interval.start)),
+             asSeconds(contribution.duration),
              active});
     }
     return snapshot;
@@ -150,11 +144,11 @@ DashboardHistorySnapshot queryDashboardHistory(
     snapshot.sessions.reserve(report.sessionIntervals.size());
     for (std::size_t index = 0; index < report.sessionIntervals.size(); ++index) {
         const TimeRange interval = report.sessionIntervals[index];
-        const bool active = trackingActive && index + 1 == report.sessionIntervals.size() &&
-                            interval.end == now;
+        const auto& contribution = report.contributions[index];
+        const bool active = trackingActive && contribution.active;
         snapshot.sessions.push_back(
             {interval,
-             asSeconds(std::chrono::microseconds(interval.end - interval.start)),
+             asSeconds(contribution.duration),
              active});
     }
 
@@ -170,13 +164,7 @@ DashboardHistorySnapshot queryDashboardHistory(
         bucket.start = bucketStart;
         bucket.end = std::min(bucket.end, report.range.end);
         std::chrono::microseconds duration{};
-        for (const auto& interval : report.sessionIntervals) {
-            const Timestamp start = std::max(bucket.start, interval.start);
-            const Timestamp end = std::min(bucket.end, interval.end);
-            if (end > start) {
-                duration += std::chrono::microseconds(end - start);
-            }
-        }
+        for (const auto& contribution : report.contributions) duration += contributionWithin(contribution,bucket);
         snapshot.buckets.push_back({bucket, asSeconds(duration)});
         if (bucket.end <= bucketStart) {
             throw std::runtime_error(

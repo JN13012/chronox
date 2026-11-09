@@ -47,6 +47,7 @@ if(WIN32)
         windows/dashboard_data.cpp
         windows/dashboard_window.cpp
         windows/main.cpp
+        windows/windows_time_source.cpp
         windows/widget_presentation.cpp
         windows/widget_preferences.cpp
         windows/window_coordinator.cpp
@@ -67,6 +68,7 @@ if(WIN32)
         D2d1
         Dwrite
         Comctl32
+        Mincore
     )
     target_compile_definitions(chronox PRIVATE
         UNICODE
@@ -87,6 +89,11 @@ if(WIN32)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(chronox_temporal_scenarios ../scripts/diagnostics/temporal-sync/temporal_sync_tests.cpp)
+    target_link_libraries(chronox_temporal_scenarios PRIVATE chronox_storage)
+    foreach(scenario baseline forward backward midnight midnight-offset sleep-qpc-advances sleep-qpc-pauses resume-forward resume-backward restart restart-future duplicates)
+        add_test(NAME temporal_${scenario} COMMAND chronox_temporal_scenarios ${scenario})
+    endforeach()
     add_executable(chronox_temporal_storage_tests tests/temporal_storage_tests.cpp)
     target_link_libraries(chronox_temporal_storage_tests PRIVATE chronox_storage chronox_sqlite)
     add_test(NAME chronox_temporal_storage_tests COMMAND chronox_temporal_storage_tests)

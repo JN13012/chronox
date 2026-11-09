@@ -19,6 +19,7 @@ struct WidgetSnapshot {
     std::chrono::seconds monthDuration{};
     std::wstring monthLabel;
     bool counting{};
+    bool timeUncertain{};
 };
 
 class ChronoxWidget {

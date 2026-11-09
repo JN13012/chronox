@@ -538,6 +538,12 @@ void SessionDatabase::backupTo(
 }
 
 Timestamp SessionDatabase::latestRecordedTimestamp() const {
+    if (impl_->hasMeasured || impl_->mode == StorageMode::ReadOnly) {
+        Statement durable(impl_->database, impl_->hasMeasured
+            ? "SELECT MAX(value) FROM (SELECT COALESCE(MAX(COALESCE(ended_at_us,checkpoint_at_us)),0) value FROM session_intervals UNION ALL SELECT COALESCE(MAX(utc_end),0) FROM measured_spans)"
+            : "SELECT COALESCE(MAX(COALESCE(ended_at_us,checkpoint_at_us)),0) FROM session_intervals");
+        durable.step(); return durable.integer(0);
+    }
     Statement query(impl_->database,
                     "SELECT COALESCE(MAX(ended_at_us), 0) FROM session_intervals");
     if (query.step() != SQLITE_ROW) {
