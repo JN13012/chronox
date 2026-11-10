@@ -62,7 +62,7 @@ public:
 
 private:
     HistoryReport queryMeasuredHistory(TimeRange, CalendarPeriod, const CalendarTimeConverter*) const;
-    std::chrono::microseconds duration(TimeRange range, Timestamp now) const;
+    std::chrono::microseconds legacyDuration(TimeRange range, Timestamp now) const;
     HistoryReport queryHistory(TimeRange range,
                                CalendarPeriod period,
                                Timestamp now,

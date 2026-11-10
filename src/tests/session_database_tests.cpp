@@ -710,6 +710,13 @@ void measuredSessionsRespectBothDstDays() {
         engine.stop({day.end,d,d});db.updateTemporal(engine,true);
         const auto report=db.queryHistory(CalendarPeriod::Day,day.start,day.end,converter);
         require(report.sessionDuration==std::chrono::hours(entry.second),"V2 measured durations respect 23/25 hour DST days");
+        for(auto period:{CalendarPeriod::Day,CalendarPeriod::Week,CalendarPeriod::Month,CalendarPeriod::Year}) {
+            const auto anchor=toMicroseconds(entry.first);
+            require(db.duration(period,anchor,converter)==db.queryHistory(period,anchor,anchor,converter).sessionDuration,
+                    "measured duration agrees with history across injected DST calendars");
+            require(db.duration(period,anchor,converter)==std::chrono::hours(entry.second),
+                    "measured duration includes the complete recorded 23/25 hour day");
+        }
     }
 }
 

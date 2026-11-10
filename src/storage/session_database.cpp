@@ -570,16 +570,20 @@ Timestamp SessionDatabase::latestRecordedTimestamp() const {
 
 std::chrono::microseconds SessionDatabase::duration(CalendarPeriod period,
                                                      Timestamp now) const {
+    if (impl_->hasMeasured || impl_->mode == StorageMode::ReadOnly)
+        return queryHistory(period, now, now).sessionDuration;
     const TimeRange range = calendarPeriodContaining(now, period);
-    return duration(range, now);
+    return legacyDuration(range, now);
 }
 
 std::chrono::microseconds SessionDatabase::duration(
     CalendarPeriod period,
     Timestamp now,
     const CalendarTimeConverter& converter) const {
+    if (impl_->hasMeasured || impl_->mode == StorageMode::ReadOnly)
+        return queryHistory(period, now, now, converter).sessionDuration;
     const TimeRange range = calendarPeriodContaining(now, period, converter);
-    return duration(range, now);
+    return legacyDuration(range, now);
 }
 
 HistoryReport SessionDatabase::queryHistory(CalendarPeriod period,
@@ -658,7 +662,9 @@ HistoryReport SessionDatabase::queryHistory(TimeRange range,
     return report;
 }
 
-std::chrono::microseconds SessionDatabase::duration(TimeRange range,
+// Legacy keeps its full-period aggregation and active checkpoint floor. Measured
+// and read-only queries share queryHistory's durable contributions instead.
+std::chrono::microseconds SessionDatabase::legacyDuration(TimeRange range,
                                                      Timestamp now) const {
     Statement query(
         impl_->database,

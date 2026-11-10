@@ -22,7 +22,98 @@ struct Sql {
     bool execute(const char* sql){return sqlite3_exec(db,sql,nullptr,nullptr,nullptr)==SQLITE_OK;}
 };
 const char* rowsSql="SELECT group_concat(id||':'||started_at_us||':'||checkpoint_at_us||':'||COALESCE(ended_at_us,'NULL'),'|') FROM session_intervals";
+std::tm nativeLocal(std::time_t t) { return *std::localtime(&t); }
+std::time_t nativeTimestamp(std::tm t) {t.tm_isdst=-1;return std::mktime(&t);}
+std::tm utcLocal(std::time_t t) { return *std::gmtime(&t); }
+std::time_t utcTimestamp(std::tm t) {
+    using namespace std::chrono;
+    const auto month=year{t.tm_year+1900}/January+months{t.tm_mon};
+    return duration_cast<seconds>((sys_days{month/day{1}}+days{t.tm_mday-1}+
+        hours{t.tm_hour}+minutes{t.tm_min}+seconds{t.tm_sec}).time_since_epoch()).count();
+}
+const CalendarTimeConverter utcConverter{utcLocal,utcTimestamp};
+void durationMatchesHistory(SessionDatabase& db, Timestamp anchor) {
+    const CalendarTimeConverter nativeConverter{nativeLocal,nativeTimestamp};
+    for(auto p:{CalendarPeriod::Day,CalendarPeriod::Week,CalendarPeriod::Month,CalendarPeriod::Year}) {
+        const auto native=db.duration(p,anchor);
+        check(native==db.queryHistory(p,anchor,anchor).sessionDuration,"duration/native history agreement");
+        check(native==db.duration(p,anchor,nativeConverter),"both overloads agree with native converter");
+        const auto utc=db.duration(p,anchor,utcConverter);
+        check(utc==db.queryHistory(p,anchor,anchor,utcConverter).sessionDuration,"duration/injected history agreement");
+        check(native.count()>=0&&utc.count()>=0,"duration remains nonnegative");
+    }
+}
+void durationRegressionCoverage() {
+    Temp t;
+    const auto v1=t.file("legacy.db"), mixed=t.file("mixed.db");
+    {
+        SessionDatabase db(v1);
+        db.setCounting(true,base);db.checkpoint(base+1'000'003);
+        durationMatchesHistory(db,base+2'000'007);
+        check(db.duration(CalendarPeriod::Day,base+2'000'007).count()==2'000'007,"Legacy open interval projects to now in microseconds");
+        db.setCounting(false,base+3'000'011);
+        durationMatchesHistory(db,base+4'000'013);
+        db.setCounting(true,base+10'000'000);db.checkpoint(base+11'000'017);
+        db.backupTo(mixed);
+    }
+    {
+        SessionDatabase db(v1,StorageMode::ReadOnly);
+        durationMatchesHistory(db,base);durationMatchesHistory(db,base+100'000'000);
+        check(db.duration(CalendarPeriod::Day,base).count()==4'000'028,"ReadOnly freezes V1 open checkpoint and retains future recorded rows");
+    }
+    {SessionDatabase db(v1);durationMatchesHistory(db,base+100'000'000);
+        check(db.duration(CalendarPeriod::Day,base+100'000'000).count()==4'000'028,"Legacy recovery retains durable durations");}
+    std::string legacyRows;{Sql q(mixed);legacyRows=q.scalar(rowsSql);}
+    {
+        SessionDatabase db(mixed,StorageMode::Measured);
+        TemporalEngine e(false,{base,0,0});db.updateTemporal(e,true);
+        e.observe({base+2'000'019,2'000'019,2'000'019});db.updateTemporal(e,false);
+        durationMatchesHistory(db,base);
+        check(db.duration(CalendarPeriod::Day,base).count()==6'000'047,"mixed history plus live measured contribution exactly once");
+        db.updateTemporal(e,true);db.updateTemporal(e,true);durationMatchesHistory(db,base);
+        e.observe({base+3'000'023,3'000'023,3'000'023});db.updateTemporal(e,false);
+        durationMatchesHistory(db,base);
+    }
+    {
+        SessionDatabase db(mixed,StorageMode::Measured);durationMatchesHistory(db,base);
+        check(db.duration(CalendarPeriod::Day,base).count()==6'000'047,"recovery excludes non-durable measured tail");
+        TemporalEngine e(false,{base-120'000'000,0,0});db.updateTemporal(e,true);
+        e.stop({base-119'000'001,999'999,999'999});db.updateTemporal(e,true);
+        durationMatchesHistory(db,base);
+        check(db.duration(CalendarPeriod::Day,base).count()==7'000'046,"restart before historical timestamps adds only new measured time");
+    }
+    {SessionDatabase db(mixed,StorageMode::ReadOnly);durationMatchesHistory(db,base);}
+    {SessionDatabase db(mixed);durationMatchesHistory(db,base);}
+    {Sql q(mixed);check(q.scalar(rowsSql)==legacyRows,"duration reads and measured recovery never change legacy rows");}
+
+    // Monday, midnight, month/year boundary; exact sub-second partitioning.
+    const Timestamp boundary=std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::sys_days{std::chrono::year{2024}/std::chrono::January/1}.time_since_epoch()).count();
+    const auto v2=t.file("measured-only.db");
+    {
+        SessionDatabase db(v2,StorageMode::Measured);
+        TemporalEngine e(false,{boundary-1'000'001,0,0});db.updateTemporal(e,true);
+        e.observe({boundary+2'000'003,3'000'004,3'000'004});db.updateTemporal(e,false);
+        durationMatchesHistory(db,boundary-1);durationMatchesHistory(db,boundary);
+        check(db.duration(CalendarPeriod::Day,boundary-1,utcConverter).count()==1'000'001,"microseconds before midnight");
+        check(db.duration(CalendarPeriod::Day,boundary,utcConverter).count()==2'000'003,"microseconds after midnight");
+        e.observe({boundary-2'000'000,3'000'004,3'000'004});db.updateTemporal(e,true);
+        e.observe({boundary-1'000'000,4'000'004,4'000'004});db.updateTemporal(e,false);
+        durationMatchesHistory(db,boundary-1);durationMatchesHistory(db,boundary);
+        e.observe({boundary+120'000'000,4'000'004,4'000'004});db.updateTemporal(e,true);
+        e.stop({boundary+120'500'007,4'500'011,4'500'011});db.updateTemporal(e,true);
+        for(auto p:{CalendarPeriod::Day,CalendarPeriod::Week,CalendarPeriod::Month,CalendarPeriod::Year}) {
+            check(db.duration(p,boundary-1,utcConverter).count()==2'000'001,"rollback adds one measured second to old calendar period");
+            check(db.duration(p,boundary,utcConverter).count()==2'500'010,"forward jump adds no fictitious time to new period");
+        }
+        durationMatchesHistory(db,boundary-1);durationMatchesHistory(db,boundary);
+    }
+    {SessionDatabase db(v2,StorageMode::ReadOnly);durationMatchesHistory(db,boundary);}
+    {Sql q(v2);check(q.scalar("SELECT COUNT(*) FROM session_intervals")=="0","V2-only fixture has no Legacy contribution");
+        check(q.scalar("SELECT SUM(duration_us) FROM measured_spans")=="4500011","corrections do not duplicate measured duration");}
+}
 int main(){try {
+    durationRegressionCoverage();
     Temp t;
     const auto original=t.file("original-v1.db"), copy=t.file("copy.db"), backup=t.file("backup.db");
     {
