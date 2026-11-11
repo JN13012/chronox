@@ -2,6 +2,7 @@
 
 #include "calendar_period.h"
 #include "temporal_engine.h"
+#include "activity_tracker.h"
 
 #include <chrono>
 #include <cstddef>
@@ -12,7 +13,7 @@
 
 namespace chronox {
 
-enum class StorageMode { Legacy, Measured, ReadOnly };
+enum class StorageMode { Legacy, Measured, ReadOnly, Activity };
 struct SessionContribution {
     TimeRange interval;
     std::chrono::microseconds duration{};
@@ -20,6 +21,12 @@ struct SessionContribution {
     Timestamp epoch{};
 };
 std::chrono::microseconds contributionWithin(const SessionContribution&, TimeRange);
+
+struct ActivityReport {
+    std::chrono::microseconds duration{};
+    bool measured{};
+    std::vector<SessionContribution> contributions;
+};
 
 struct HistoryReport {
     CalendarPeriod period;
@@ -44,7 +51,8 @@ public:
     void setCounting(bool counting, Timestamp timestamp);
     void checkpoint(Timestamp timestamp);
     // Commits pending boundaries atomically; otherwise refreshes RAM only.
-    void updateTemporal(TemporalEngine& engine, bool durable);
+    void updateTemporal(TemporalEngine& engine, bool durable, ActivityTracker* activity = nullptr);
+    ActivityReport queryActivity(CalendarPeriod period, Timestamp anchor, const CalendarTimeConverter* converter = nullptr) const;
     Timestamp uncertaintyCount() const;
     void backupTo(const std::filesystem::path& destination) const;
     Timestamp latestRecordedTimestamp() const;
