@@ -15,7 +15,9 @@ public:
 
     WindowCoordinator(ErrorHandler errorHandler,
                       SnapshotProvider snapshotProvider,
-                      HistoryProvider historyProvider);
+                      HistoryProvider historyProvider,
+                      DashboardWindow::SettingsProvider settingsProvider = {},
+                      DashboardWindow::SettingsHandler settingsHandler = {});
     ~WindowCoordinator();
 
     WindowCoordinator(const WindowCoordinator&) = delete;
@@ -28,6 +30,8 @@ private:
     ErrorHandler errorHandler_{};
     SnapshotProvider snapshotProvider_{};
     HistoryProvider historyProvider_{};
+    DashboardWindow::SettingsProvider settingsProvider_;
+    DashboardWindow::SettingsHandler settingsHandler_;
     std::unique_ptr<DashboardWindow> dashboard_;
 };
 

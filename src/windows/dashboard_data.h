@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/calendar_period.h"
+#include "../core/activity_tracker.h"
 
 #include <array>
 #include <chrono>
@@ -26,6 +27,10 @@ struct DashboardSnapshot {
     std::vector<TimeRange> todayIntervals;
     std::array<std::chrono::seconds, 7> weekDays{};
     std::vector<DashboardSession> recentSessions;
+    std::array<std::chrono::seconds,4> activityDurations{};
+    std::array<bool,4> activityMeasured{};
+    ActivityState activityState{ActivityState::Inactive};
+    bool activityDetectionEnabled{true};
     bool trackingActive{};
     bool timeUncertain{};
 };
@@ -41,6 +46,8 @@ struct DashboardHistorySnapshot {
     TimeRange range{};
     Timestamp capturedAt{};
     std::chrono::seconds duration{};
+    std::chrono::seconds activityDuration{};
+    bool activityMeasured{};
     std::size_t daysWithActivity{};
     std::vector<DashboardHistoryBucket> buckets;
     std::vector<DashboardSession> sessions;

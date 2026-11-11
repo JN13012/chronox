@@ -1,4 +1,5 @@
 #include "session_database.h"
+#include "../windows/dashboard_data.h"
 #include <sqlite3.h>
 #include <filesystem>
 #include <iostream>
@@ -36,6 +37,10 @@ int main() {
             auto r=db.queryActivity(period,B); check(r.measured && r.duration.count()==300*S);
             Timestamp sum{}; for(auto c:r.contributions) sum+=c.duration.count(); check(sum==r.duration.count());
         }
+        const auto dashboard=queryDashboardSnapshot(db,B,false);
+        for(std::size_t i=0;i<4;++i) check(dashboard.activityMeasured[i] && dashboard.activityDurations[i].count()==300);
+        const auto history=queryDashboardHistory(db,CalendarPeriod::Day,B,B,false);
+        check(history.activityMeasured && history.activityDuration.count()==300);
         check(!db.queryActivity(CalendarPeriod::Year,B-400LL*86400*S).measured);
         db.backupTo(backup);
     }

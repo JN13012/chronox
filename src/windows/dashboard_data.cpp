@@ -78,6 +78,11 @@ DashboardSnapshot queryDashboardSnapshot(
         queryHistory(database, CalendarPeriod::Year, now, converter);
 
     DashboardSnapshot snapshot;
+    constexpr CalendarPeriod periods[]{CalendarPeriod::Day,CalendarPeriod::Week,CalendarPeriod::Month,CalendarPeriod::Year};
+    for(std::size_t i=0;i<4;++i) {
+        const auto a=database.queryActivity(periods[i],now,converter);
+        snapshot.activityDurations[i]=asSeconds(a.duration); snapshot.activityMeasured[i]=a.measured;
+    }
     snapshot.todayDuration = asSeconds(day.sessionDuration);
     snapshot.weekDuration = asSeconds(week.sessionDuration);
     snapshot.monthDuration = asSeconds(month.sessionDuration);
@@ -140,6 +145,8 @@ DashboardHistorySnapshot queryDashboardHistory(
     snapshot.range = report.range;
     snapshot.capturedAt = now;
     snapshot.duration = asSeconds(report.sessionDuration);
+    const auto activity=database.queryActivity(period,anchor,converter);
+    snapshot.activityDuration=asSeconds(activity.duration); snapshot.activityMeasured=activity.measured;
     snapshot.daysWithActivity = report.daysWithDuration;
     snapshot.trackingActive = trackingActive;
     snapshot.timeUncertain = database.uncertaintyCount()!=0;

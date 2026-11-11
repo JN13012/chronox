@@ -15,8 +15,12 @@ public:
     using HistoryProvider =
         std::function<DashboardHistorySnapshot(CalendarPeriod, Timestamp)>;
 
+    using SettingsProvider = std::function<ActivitySettings()>;
+    using SettingsHandler = std::function<void(ActivitySettings)>;
+
     DashboardWindow(ErrorHandler errorHandler, SnapshotProvider snapshotProvider,
-                    HistoryProvider historyProvider);
+                    HistoryProvider historyProvider, SettingsProvider settingsProvider = {},
+                    SettingsHandler settingsHandler = {});
     ~DashboardWindow();
 
     DashboardWindow(const DashboardWindow&) = delete;

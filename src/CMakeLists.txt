@@ -53,6 +53,7 @@ if(WIN32)
         windows/windows_input_source.cpp
         windows/widget_presentation.cpp
         windows/widget_preferences.cpp
+        windows/activity_preferences.cpp
         windows/window_coordinator.cpp
         windows/windows_session_monitor.cpp
         windows/windows_startup.cpp
@@ -92,7 +93,7 @@ if(WIN32)
 endif()
 
 if(BUILD_TESTING)
-    add_executable(chronox_activity_storage_tests tests/activity_storage_tests.cpp)
+    add_executable(chronox_activity_storage_tests tests/activity_storage_tests.cpp windows/dashboard_data.cpp)
     target_link_libraries(chronox_activity_storage_tests PRIVATE chronox_storage chronox_sqlite)
     add_test(NAME chronox_activity_storage_tests COMMAND chronox_activity_storage_tests)
     add_executable(chronox_activity_tracker_tests tests/activity_tracker_tests.cpp)
@@ -162,6 +163,10 @@ if(BUILD_TESTING)
     add_test(NAME chronox_widget_tests COMMAND chronox_widget_tests)
 
     if(WIN32)
+        add_executable(chronox_activity_preferences_tests tests/activity_preferences_tests.cpp windows/activity_preferences.cpp)
+        target_link_libraries(chronox_activity_preferences_tests PRIVATE chronox_core Advapi32)
+        target_compile_definitions(chronox_activity_preferences_tests PRIVATE UNICODE _UNICODE NOMINMAX)
+        add_test(NAME chronox_activity_preferences_tests COMMAND chronox_activity_preferences_tests)
         add_executable(chronox_dashboard_smoke WIN32 EXCLUDE_FROM_ALL
             windows/chronox.rc
             tests/dashboard_window_smoke.cpp

@@ -291,10 +291,11 @@ Timestamp localDayHourBoundary(Timestamp dayStart, int hour) {
 
 struct DashboardWindow::Impl {
     Impl(ErrorHandler errorHandlerValue, SnapshotProvider snapshotProviderValue,
-         HistoryProvider historyProviderValue)
+         HistoryProvider historyProviderValue, SettingsProvider settingsProviderValue, SettingsHandler settingsHandlerValue)
         : errorHandler(std::move(errorHandlerValue)),
           snapshotProvider(std::move(snapshotProviderValue)),
-          historyProvider(std::move(historyProviderValue)) {}
+          historyProvider(std::move(historyProviderValue)),
+          settingsProvider(std::move(settingsProviderValue)), settingsHandler(std::move(settingsHandlerValue)) {}
 
     ~Impl() {
         if (window != nullptr && IsWindow(window)) {
@@ -314,6 +315,15 @@ struct DashboardWindow::Impl {
     ErrorHandler errorHandler{};
     SnapshotProvider snapshotProvider{};
     HistoryProvider historyProvider{};
+    SettingsProvider settingsProvider{};
+    SettingsHandler settingsHandler{};
+    HWND activityCheckbox{}, activityDelay{};
+    ActivitySettings displayedSettings{};
+    bool settingsDisplayed{};
+    float settingsLeft{-1}, settingsRight{-1};
+    UINT settingsDpi{};
+    static constexpr int ActivityEnabledId=3101, ActivityDelayId=3102;
+    static constexpr int delays[]{1,5,10,15,30};
     DashboardSnapshot snapshot{};
     std::map<std::pair<int, Timestamp>, DashboardHistorySnapshot> historyCache{};
     const DashboardHistorySnapshot* activeHistory{};
@@ -623,7 +633,18 @@ struct DashboardWindow::Impl {
                                      D2D1::Point2F(left + 6.0f, statusY + 8.0f),
                                      4.0f, 4.0f),
                                  statusColor);
-        drawText(snapshot.timeUncertain ? L"MESURE INCERTAINE" : (snapshot.trackingActive ? L"SUIVI ACTIF" : L"SUIVI INACTIF"),
+        const wchar_t* activityLabel=L"Inactif";
+        switch(snapshot.activityState) {
+        case ActivityState::Active: activityLabel=L"Actif"; break;
+        case ActivityState::Inactive: break;
+        case ActivityState::Locked: activityLabel=L"Verrouill\u00e9"; break;
+        case ActivityState::Sleeping: activityLabel=L"Veille"; break;
+        case ActivityState::Uncertain: activityLabel=L"Mesure incertaine"; break;
+        }
+        std::wstring status=std::wstring(L"Activit\u00e9 : ")+activityLabel;
+        if(!snapshot.activityDetectionEnabled) status+=L"  /  D\u00e9tection d\u00e9sactiv\u00e9e";
+        if(snapshot.timeUncertain) status+=L"  /  Session incertaine";
+        drawText(status.c_str(),
                  compactNavFormat.Get(), statusColor,
                  D2D1::RectF(left + 18.0f, statusY, right, statusY + 18.0f));
 
@@ -635,7 +656,7 @@ struct DashboardWindow::Impl {
             snapshot.todayDuration, snapshot.weekDuration, snapshot.monthDuration,
             snapshot.yearDuration};
         const float metricsTop = top + 24.0f;
-        const float metricsHeight = 66.0f;
+        const float metricsHeight = 94.0f;
         const float metricWidth = (width - gap * 3.0f) / 4.0f;
         for (std::size_t index = 0; index < metricValues.size(); ++index) {
             const float cardLeft =
@@ -653,11 +674,15 @@ struct DashboardWindow::Impl {
                      D2D1::RectF(cardLeft + 10.0f, metricsTop + 8.0f,
                                  cardLeft + metricWidth - 8.0f,
                                  metricsTop + 25.0f));
-            const std::wstring value = formatDuration(metricValues[index]);
-            drawText(value.c_str(), pageFormat.Get(), textBrush.Get(),
+            const std::wstring value = L"Session " + formatDuration(metricValues[index]);
+            drawText(value.c_str(), compactNavFormat.Get(), textBrush.Get(),
                      D2D1::RectF(cardLeft + 10.0f, metricsTop + 30.0f,
                                  cardLeft + metricWidth - 7.0f,
-                                 metricsTop + metricsHeight - 4.0f));
+                                 metricsTop + 63.0f));
+            const auto activityText=std::wstring(L"Activit\u00e9 : ")+
+                (snapshot.activityMeasured[index]?formatDuration(snapshot.activityDurations[index]):L"non mesur\u00e9e");
+            drawText(activityText.c_str(),compactNavFormat.Get(),cyanBrush.Get(),
+                D2D1::RectF(cardLeft+10.0f,metricsTop+69.0f,cardLeft+metricWidth-7.0f,metricsTop+90.0f));
         }
 
         const float chartsTop = metricsTop + metricsHeight + 9.0f;
@@ -1594,6 +1619,53 @@ struct DashboardWindow::Impl {
         return labels[index];
     }
 
+    void layoutActivityControls(bool visible, float left, float right) {
+        if(!settingsProvider || !settingsHandler) return;
+        if(!activityCheckbox && visible) {
+            activityCheckbox=CreateWindowExW(0,L"BUTTON",L"D\u00e9tection d'inactivit\u00e9 clavier / souris",
+                WS_CHILD|WS_TABSTOP|BS_AUTOCHECKBOX,0,0,0,0,window,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(ActivityEnabledId)),GetModuleHandleW(nullptr),nullptr);
+            activityDelay=CreateWindowExW(0,L"COMBOBOX",L"D\u00e9lai d'inactivit\u00e9",
+                WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,0,0,window,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(ActivityDelayId)),GetModuleHandleW(nullptr),nullptr);
+            if(!activityCheckbox || !activityDelay) throw windowsError("CreateWindowExW(activity settings)",GetLastError());
+            for(int delay:delays) { const auto label=std::to_wstring(delay)+L" min"; SendMessageW(activityDelay,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str())); }
+            for(HWND control:{activityCheckbox,activityDelay}) {
+                SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+                SetWindowSubclass(control,settingsControlProcedure,1,reinterpret_cast<DWORD_PTR>(this));
+            }
+        }
+        if(!activityCheckbox) return;
+        if(visible) {
+            const auto settings=settingsProvider();
+            if(!settingsDisplayed || settings!=displayedSettings) {
+                SendMessageW(activityCheckbox,BM_SETCHECK,settings.enabled?BST_CHECKED:BST_UNCHECKED,0);
+                for(int i=0;i<5;++i) if(delays[i]==settings.minutes) SendMessageW(activityDelay,CB_SETCURSEL,i,0);
+                EnableWindow(activityDelay,settings.enabled); displayedSettings=settings; settingsDisplayed=true;
+            }
+            const auto px=[&](float x){ return MulDiv(static_cast<int>(x),static_cast<int>(dpi),96); };
+            if(left!=settingsLeft || right!=settingsRight || dpi!=settingsDpi) {
+                MoveWindow(activityCheckbox,px(left),px(202),px(right-left),px(32),TRUE);
+                MoveWindow(activityDelay,px(left),px(270),px(150),px(210),TRUE);
+                settingsLeft=left; settingsRight=right; settingsDpi=dpi;
+            }
+        }
+        ShowWindow(activityCheckbox,visible?SW_SHOW:SW_HIDE);
+        ShowWindow(activityDelay,visible?SW_SHOW:SW_HIDE);
+    }
+    static LRESULT CALLBACK settingsControlProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR data) {
+        auto* self=reinterpret_cast<Impl*>(data);
+        if(msg==WM_KEYDOWN && w==VK_TAB) {
+            const bool backwards=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+            if(hwnd==self->activityCheckbox && !backwards && IsWindowEnabled(self->activityDelay)) SetFocus(self->activityDelay);
+            else if(hwnd==self->activityDelay && backwards) SetFocus(self->activityCheckbox);
+            else SetFocus(self->window);
+            return 0;
+        }
+        if(msg==WM_NCDESTROY) RemoveWindowSubclass(hwnd,settingsControlProcedure,1);
+        return DefSubclassProc(hwnd,msg,w,l);
+    }
+
     void drawContent() {
         const D2D1_SIZE_F size = clientSize();
         const float left = sidebarWidth(size.width);
@@ -1601,6 +1673,7 @@ struct DashboardWindow::Impl {
         const float contentLeft = left + padding;
         const float contentRight = size.width - padding;
         const float contentWidth = std::max(0.0f, contentRight - contentLeft);
+        layoutActivityControls(activePage==DashboardPage::Settings,contentLeft+24.0f,contentRight-24.0f);
         if (contentWidth < 24.0f || size.height < 210.0f) {
             return;
         }
@@ -1638,22 +1711,14 @@ struct DashboardWindow::Impl {
             return;
         }
 
-        const float inset = std::min(36.0f, contentWidth * 0.08f);
-        const float textLeft = contentLeft + inset;
-        const float textRight = contentRight - inset;
-        const float messageTop = std::min(panelTop + 52.0f, panelBottom - 120.0f);
-        const auto marker = D2D1::RoundedRect(
-            D2D1::RectF(textLeft, messageTop, textLeft + 42.0f,
-                        messageTop + 4.0f),
-            2.0f, 2.0f);
-        renderTarget->FillRoundedRectangle(marker, accentBrush.Get());
-        drawText(pageDescription(), bodyFormat.Get(), textBrush.Get(),
-                 D2D1::RectF(textLeft, messageTop + 22.0f, textRight,
-                             std::min(messageTop + 92.0f, panelBottom - 10.0f)));
-        drawText(L"Les donn\u00e9es restent enregistr\u00e9es localement.",
-                 compactNavFormat.Get(), mutedBrush.Get(),
-                 D2D1::RectF(textLeft, messageTop + 104.0f, textRight,
-                             std::min(messageTop + 130.0f, panelBottom - 4.0f)));
+        drawText(L"Temps d'activit\u00e9 clavier / souris",bodyFormat.Get(),textBrush.Get(),
+            D2D1::RectF(contentLeft+24,162,contentRight-24,194));
+        drawText(L"D\u00e9lai avant suspension",compactNavFormat.Get(),mutedBrush.Get(),
+            D2D1::RectF(contentLeft+24,244,contentRight-24,266));
+        drawText(L"D\u00e9sactiv\u00e9e : l'activit\u00e9 suit la session, sans recalcul du pass\u00e9.",bodyFormat.Get(),mutedBrush.Get(),
+            D2D1::RectF(contentLeft+24,320,contentRight-24,370));
+        drawText(L"Aucun contenu collect\u00e9. Les intervalles d'activit\u00e9 r\u00e9v\u00e8lent indirectement des p\u00e9riodes d'interaction.",bodyFormat.Get(),mutedBrush.Get(),
+            D2D1::RectF(contentLeft+24,386,contentRight-24,460));
     }
 
     const wchar_t* pageDescription() const {
@@ -1864,6 +1929,17 @@ struct DashboardWindow::Impl {
             }
             return DefWindowProcW(hwnd, message, wParam, lParam);
         }
+        case WM_COMMAND:
+            if(settingsHandler && ((LOWORD(wParam)==ActivityEnabledId && HIWORD(wParam)==BN_CLICKED) ||
+               (LOWORD(wParam)==ActivityDelayId && HIWORD(wParam)==CBN_SELCHANGE))) {
+                const auto index=SendMessageW(activityDelay,CB_GETCURSEL,0,0);
+                if(index>=0 && index<5) {
+                    settingsHandler({SendMessageW(activityCheckbox,BM_GETCHECK,0,0)==BST_CHECKED,delays[index]});
+                    snapshot=snapshotProvider(); historyCache.clear(); activeHistory=nullptr; render();
+                }
+                return 0;
+            }
+            return DefWindowProcW(hwnd,message,wParam,lParam);
         case WM_LBUTTONUP: {
             const int x = MulDiv(GET_X_LPARAM(lParam), 96,
                                  static_cast<int>(dpi));
@@ -1900,6 +1976,7 @@ struct DashboardWindow::Impl {
             }
             return 0;
         case WM_KEYDOWN:
+            if(activePage==DashboardPage::Settings && wParam==VK_TAB && activityCheckbox) { SetFocus(activityCheckbox); return 0; }
             if (activePage == DashboardPage::History &&
                 !IsWindowVisible(calendarWindow)) {
                 switch (wParam) {
@@ -1999,10 +2076,10 @@ struct DashboardWindow::Impl {
 
 DashboardWindow::DashboardWindow(ErrorHandler errorHandler,
                                  SnapshotProvider snapshotProvider,
-                                 HistoryProvider historyProvider)
+                                 HistoryProvider historyProvider, SettingsProvider settingsProvider, SettingsHandler settingsHandler)
     : impl_(std::make_unique<Impl>(std::move(errorHandler),
                                    std::move(snapshotProvider),
-                                   std::move(historyProvider))) {}
+                                   std::move(historyProvider),std::move(settingsProvider),std::move(settingsHandler))) {}
 
 DashboardWindow::~DashboardWindow() = default;
 

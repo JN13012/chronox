@@ -8,6 +8,7 @@
 #include "../core/calendar_period.h"
 #include "windows_time_source.h"
 #include "windows_input_source.h"
+#include "activity_preferences.h"
 #include "../core/temporal_engine.h"
 #include "../core/temporal_diagnostics.h"
 #include "../storage/session_database.h"
@@ -156,7 +157,8 @@ int runChronox(bool startHidden,
     std::exception_ptr callbackError;
     bool stopped = false;
     chronox::SessionDatabase database(databasePath(), chronox::StorageMode::Activity);
-    chronox::ActivityTracker activity;
+    chronox::ActivityPreferences activityPreferences;
+    chronox::ActivityTracker activity(activityPreferences.load());
     chronox::Timestamp lastCheckpoint{};
     chronox::WidgetPreferences widgetPreferences;
     wchar_t diagnosticFlag[2]{};
@@ -195,8 +197,9 @@ int runChronox(bool startHidden,
             throw std::logic_error("Session tracker is not initialized");
         }
         const auto state = observe();
-        return chronox::queryDashboardSnapshot(
-            database, state.utc, state.counting);
+        auto result=chronox::queryDashboardSnapshot(database, state.utc, state.counting);
+        result.activityState=activity.state(); result.activityDetectionEnabled=activity.settings().enabled;
+        return result;
     };
     const auto provideDashboardHistory =
         [&](chronox::CalendarPeriod period, chronox::Timestamp anchor) {
@@ -209,7 +212,15 @@ int runChronox(bool startHidden,
                 state.counting);
         };
     chronox::WindowCoordinator windowCoordinator(
-        captureError, provideDashboardSnapshot, provideDashboardHistory);
+        captureError, provideDashboardSnapshot, provideDashboardHistory,
+        [&] { return activity.settings(); },
+        [&](chronox::ActivitySettings settings) {
+            observe();
+            activityPreferences.save(settings);
+            activity.configure(settings);
+            activity.advance(engine->snapshot(),engine->snapshot(),engine->snapshot().utc,chronox::sampleWindowsInput());
+            database.updateTemporal(*engine,true,&activity);
+        });
 
     const auto stop = [&] {
         try {
