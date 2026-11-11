@@ -3,6 +3,7 @@ add_library(chronox_core
    core/session_tracker.cpp
    core/utc_timestamp_clock.cpp
    core/temporal_engine.cpp
+   core/activity_tracker.cpp
    core/temporal_diagnostics.cpp
 )
 target_include_directories(chronox_core PUBLIC
@@ -90,6 +91,9 @@ if(WIN32)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(chronox_activity_tracker_tests tests/activity_tracker_tests.cpp)
+    target_link_libraries(chronox_activity_tracker_tests PRIVATE chronox_core)
+    add_test(NAME chronox_activity_tracker_tests COMMAND chronox_activity_tracker_tests)
     add_executable(chronox_temporal_diagnostics_tests tests/temporal_diagnostics_tests.cpp)
     target_link_libraries(chronox_temporal_diagnostics_tests PRIVATE chronox_core)
     add_test(NAME chronox_temporal_diagnostics_tests COMMAND chronox_temporal_diagnostics_tests)
