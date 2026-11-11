@@ -242,10 +242,13 @@ struct SessionDatabase::Impl {
     void migrateActivity() {
         Transaction tx(database);
         execute(database,"CREATE TABLE activity_tracking_runs(run_id INTEGER PRIMARY KEY REFERENCES temporal_runs(id), started_utc_us INTEGER NOT NULL, uncertainty_count INTEGER NOT NULL DEFAULT 0 CHECK(uncertainty_count>=0))");
+        execute(database,"CREATE TABLE activity_coverage(run_id INTEGER NOT NULL REFERENCES activity_tracking_runs(run_id), seq INTEGER NOT NULL, epoch INTEGER NOT NULL, utc_start INTEGER NOT NULL, utc_end INTEGER NOT NULL CHECK(utc_end>=utc_start), PRIMARY KEY(run_id,seq))");
+        execute(database,"CREATE INDEX activity_coverage_end ON activity_coverage(utc_end)");
         execute(database,"CREATE TABLE activity_spans("
             "run_id INTEGER NOT NULL REFERENCES activity_tracking_runs(run_id), seq INTEGER NOT NULL,"
             "epoch INTEGER NOT NULL, session INTEGER NOT NULL, utc_start INTEGER NOT NULL, utc_end INTEGER NOT NULL,"
             "mono_start INTEGER NOT NULL, mono_end INTEGER NOT NULL, duration_us INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN(0,1)),"
+            "detection_enabled INTEGER NOT NULL CHECK(detection_enabled IN(0,1)), threshold_minutes INTEGER NOT NULL CHECK(threshold_minutes IN(1,5,10,15,30)),"
             "PRIMARY KEY(run_id,seq), CHECK(mono_end>=mono_start), CHECK(duration_us=mono_end-mono_start),"
             "CHECK(utc_end>=utc_start), CHECK(utc_end-utc_start=duration_us))");
         execute(database,"CREATE UNIQUE INDEX one_activity_active ON activity_spans((1)) WHERE active=1");
@@ -255,10 +258,16 @@ struct SessionDatabase::Impl {
                 " ON activity_spans WHEN EXISTS(SELECT 1 FROM activity_spans WHERE run_id=NEW.run_id AND seq<>NEW.seq "
                 "AND mono_start<NEW.mono_end AND mono_end>NEW.mono_start) BEGIN SELECT RAISE(ABORT,'activity overlap'); END";
             execute(database,sql.c_str());
+            const auto containment=std::string("CREATE TRIGGER activity_within_session_")+action+" BEFORE "+action+
+                " ON activity_spans WHEN NOT EXISTS(SELECT 1 FROM measured_spans s WHERE s.run_id=NEW.run_id AND s.epoch=NEW.epoch "
+                "AND s.mono_start<=NEW.mono_start AND s.mono_end>=NEW.mono_end "
+                "AND NEW.utc_start=s.utc_start+NEW.mono_start-s.mono_start) "
+                "BEGIN SELECT RAISE(ABORT,'activity outside session'); END";
+            execute(database,containment.c_str());
         }
         execute(database,"CREATE TRIGGER activity_no_regression BEFORE UPDATE ON activity_spans "
             "WHEN NEW.duration_us<OLD.duration_us OR NEW.mono_start<>OLD.mono_start OR NEW.utc_start<>OLD.utc_start "
-            "OR NEW.epoch<>OLD.epoch OR NEW.session<>OLD.session OR (OLD.active=0 AND (NEW.duration_us<>OLD.duration_us OR NEW.active<>0)) "
+            "OR NEW.epoch<>OLD.epoch OR NEW.session<>OLD.session OR NEW.detection_enabled<>OLD.detection_enabled OR NEW.threshold_minutes<>OLD.threshold_minutes OR (OLD.active=0 AND (NEW.duration_us<>OLD.duration_us OR NEW.active<>0)) "
             "BEGIN SELECT RAISE(ABORT,'activity checkpoint regression'); END");
         execute(database,"PRAGMA user_version=3"); tx.commit(); hasActivity=true;
     }
@@ -414,8 +423,10 @@ struct SessionDatabase::Impl {
 
     StorageMode mode;
     bool hasMeasured{}, hasActivity{};
-    std::optional<MeasuredSpan> liveActivity;
+    std::optional<ActivitySpan> liveActivity;
+    std::optional<ActivityCoverage> liveCoverage;
     const ActivityTracker* activityOwner{};
+    Timestamp liveActivityUncertainties{};
     Timestamp run{}, priorUncertainties{}, liveUncertainties{};
     const TemporalEngine* owner{};
     std::optional<MeasuredSpan> live;
@@ -485,11 +496,11 @@ void SessionDatabase::checkpoint(Timestamp timestamp) {
 void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable, ActivityTracker* activity) {
     if (impl_->mode != StorageMode::Measured && impl_->mode != StorageMode::Activity) throw std::logic_error("Measured writer required");
     if(activity && (!impl_->hasActivity || (impl_->activityOwner && impl_->activityOwner!=activity))) throw std::logic_error("Invalid activity writer");
-    if(activity) impl_->activityOwner=activity;
+    if(activity) { impl_->activityOwner=activity; impl_->liveActivityUncertainties=activity->uncertainties(); }
     if (impl_->owner && impl_->owner != &engine) throw std::logic_error("One engine per database writer");
     impl_->owner = &engine;
     impl_->liveUncertainties = engine.snapshot().uncertainties;
-    if (durable || !engine.pending().empty() || (activity && !activity->pending().empty()) || !impl_->run) {
+    if (durable || !engine.pending().empty() || (activity && (!activity->pending().empty() || !activity->pendingCoverage().empty())) || !impl_->run) {
         Transaction tx(impl_->database);
         if (!impl_->run) {
             Statement q(impl_->database, "INSERT INTO temporal_runs(started_utc_us) VALUES(?1)");
@@ -510,13 +521,19 @@ void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable, Activ
         Statement quality(impl_->database,"UPDATE temporal_runs SET uncertainty_count=?1 WHERE id=?2");
         quality.bind(engine.snapshot().uncertainties,1);quality.bind(run,2);quality.step();
         if(activity) {
-            Statement coverage(impl_->database,"INSERT INTO activity_tracking_runs VALUES(?1,?2,?3) ON CONFLICT(run_id) DO UPDATE SET uncertainty_count=excluded.uncertainty_count");
-            coverage.bind(run,1); coverage.bind(engine.snapshot().utc,2); coverage.bind(activity->uncertainties(),3); coverage.step();
-            const auto saveActivity=[&](const MeasuredSpan& span) {
-                Statement q(impl_->database,"INSERT INTO activity_spans VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) "
+            Statement tracking(impl_->database,"INSERT INTO activity_tracking_runs VALUES(?1,?2,?3) ON CONFLICT(run_id) DO UPDATE SET uncertainty_count=excluded.uncertainty_count");
+            tracking.bind(run,1); tracking.bind(engine.snapshot().utc,2); tracking.bind(activity->uncertainties(),3); tracking.step();
+            const auto saveCoverage=[&](const ActivityCoverage& coverage) {
+                Statement q(impl_->database,"INSERT INTO activity_coverage VALUES(?1,?2,?3,?4,?5) ON CONFLICT(run_id,seq) DO UPDATE SET utc_end=excluded.utc_end");
+                q.bind(run,1); q.bind(coverage.sequence,2); q.bind(coverage.epoch,3); q.bind(coverage.utcStart,4); q.bind(coverage.utcEnd,5); q.step();
+            };
+            for(const auto& coverage:activity->pendingCoverage()) saveCoverage(coverage);
+            if(activity->coverage()) saveCoverage(*activity->coverage());
+            const auto saveActivity=[&](const ActivitySpan& span) {
+                Statement q(impl_->database,"INSERT INTO activity_spans VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) "
                     "ON CONFLICT(run_id,seq) DO UPDATE SET utc_end=excluded.utc_end,mono_end=excluded.mono_end,duration_us=excluded.duration_us,active=excluded.active");
-                const Timestamp values[]{run,span.sequence,span.epoch,span.session,span.utcStart,span.utcEnd,span.monoStart,span.monoEnd,span.duration,span.active?1:0};
-                for(int i=0;i<10;++i) q.bind(values[i],i+1); q.step();
+                const Timestamp values[]{run,span.sequence,span.epoch,span.session,span.utcStart,span.utcEnd,span.monoStart,span.monoEnd,span.duration,span.active?1:0,span.detectionEnabled?1:0,span.thresholdMinutes};
+                for(int i=0;i<12;++i) q.bind(values[i],i+1); q.step();
             };
             for(const auto& span:activity->pending()) saveActivity(span);
             if(activity->current()) saveActivity(*activity->current());
@@ -525,16 +542,16 @@ void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable, Activ
         if(activity) activity->acknowledge();
     }
     impl_->live = engine.current();
-    if(activity) impl_->liveActivity=activity->current();
+    if(activity) { impl_->liveActivity=activity->current(); impl_->liveCoverage=activity->coverage(); }
 }
 
 ActivityReport SessionDatabase::queryActivity(CalendarPeriod period, Timestamp anchor, const CalendarTimeConverter* converter) const {
     ActivityReport report;
     if(!impl_->hasActivity) return report;
     const auto range=converter ? calendarPeriodContaining(anchor,period,*converter) : calendarPeriodContaining(anchor,period);
-    Statement coverage(impl_->database,"SELECT EXISTS(SELECT 1 FROM activity_tracking_runs a JOIN measured_spans s ON s.run_id=a.run_id WHERE s.utc_end>=?1 AND s.utc_start<?2)");
+    Statement coverage(impl_->database,"SELECT EXISTS(SELECT 1 FROM activity_coverage WHERE utc_end>=?1 AND utc_start<?2)");
     coverage.bind(range.start,1); coverage.bind(range.end,2); coverage.step(); report.measured=coverage.integer(0)!=0;
-    if(impl_->activityOwner && impl_->live && impl_->live->utcEnd>=range.start && impl_->live->utcStart<range.end) report.measured=true;
+    if(impl_->liveCoverage && impl_->liveCoverage->utcEnd>=range.start && impl_->liveCoverage->utcStart<range.end) report.measured=true;
     const auto append=[&](SessionContribution c) {
         const auto d=contributionWithin(c,range);
         if(d.count()<=0) return;
@@ -549,6 +566,13 @@ ActivityReport SessionDatabase::queryActivity(CalendarPeriod period, Timestamp a
     }
     if(impl_->liveActivity) { const auto& s=*impl_->liveActivity; append({{s.utcStart,s.utcEnd},std::chrono::microseconds(s.duration),true,s.epoch}); }
     return report;
+}
+
+Timestamp SessionDatabase::activityUncertaintyCount() const {
+    if(!impl_->hasActivity) return 0;
+    Statement q(impl_->database,"SELECT COALESCE(SUM(uncertainty_count),0) FROM activity_tracking_runs WHERE run_id<>?1");
+    q.bind(impl_->activityOwner?impl_->run:0,1); q.step();
+    return q.integer(0)+(impl_->activityOwner?impl_->liveActivityUncertainties:0);
 }
 
 Timestamp SessionDatabase::uncertaintyCount() const {

@@ -244,6 +244,7 @@ int runChronox(bool startHidden,
                     engine->reconcile(chronox::WindowsSessionMonitor::queryInitiallyLocked(), chronox::sampleWindowsTime());
                 }
                 });
+                if(event==SessionEvent::Resumed || event==SessionEvent::Unlocked) activity.reconcilePower();
                 if(event==SessionEvent::Suspended) activity.setState(chronox::ActivityState::Sleeping);
                 if(event==SessionEvent::Locked) activity.setState(chronox::ActivityState::Locked);
                 database.updateTemporal(*engine, true, &activity);

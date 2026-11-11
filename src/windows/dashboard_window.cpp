@@ -643,7 +643,7 @@ struct DashboardWindow::Impl {
         }
         std::wstring status=std::wstring(L"Activit\u00e9 : ")+activityLabel;
         if(!snapshot.activityDetectionEnabled) status+=L"  /  D\u00e9tection d\u00e9sactiv\u00e9e";
-        if(snapshot.timeUncertain) status+=L"  /  Session incertaine";
+        if(snapshot.timeUncertain) status+=L"  /  Mesure incertaine (voir Historique)";
         drawText(status.c_str(),
                  compactNavFormat.Get(), statusColor,
                  D2D1::RectF(left + 18.0f, statusY, right, statusY + 18.0f));
@@ -685,7 +685,9 @@ struct DashboardWindow::Impl {
                 D2D1::RectF(cardLeft+10.0f,metricsTop+69.0f,cardLeft+metricWidth-7.0f,metricsTop+90.0f));
         }
 
-        const float chartsTop = metricsTop + metricsHeight + 9.0f;
+        drawText(L"Activit\u00e9 : couverture partielle ; historique ant\u00e9rieur non mesur\u00e9.",compactNavFormat.Get(),mutedBrush.Get(),
+            D2D1::RectF(left,metricsTop+metricsHeight+2.0f,right,metricsTop+metricsHeight+21.0f));
+        const float chartsTop = metricsTop + metricsHeight + 24.0f;
         constexpr float minimumSessionsHeight = 106.0f;
         const float chartsHeight =
             std::max(92.0f,
@@ -1137,7 +1139,7 @@ struct DashboardWindow::Impl {
     void drawHistorySummary(D2D1_RECT_F bounds) {
         const std::array<std::wstring, 4> values{
             formatDuration(activeHistory->duration),
-            std::to_wstring(activeHistory->daysWithActivity),
+            activeHistory->activityMeasured?formatDuration(activeHistory->activityDuration):L"Non mesur\u00e9e",
             std::to_wstring(activeHistory->sessions.size()),
             activeHistory->daysWithActivity == 0
                 ? L"\u2014"
@@ -1145,8 +1147,8 @@ struct DashboardWindow::Impl {
                       activeHistory->duration.count() /
                       static_cast<std::int64_t>(activeHistory->daysWithActivity)))};
         constexpr std::array<const wchar_t*, 4> labels{
-            L"COMPTABILIS\u00c9", L"JOURS ACTIFS", L"SESSIONS",
-            L"MOY. / JOUR ACTIF"};
+            L"TEMPS DE SESSION", L"TEMPS D'ACTIVIT\u00c9", L"SESSIONS",
+            L"SESSION / JOUR MESUR\u00c9"};
         const float gap = 6.0f;
         const float cardWidth =
             (bounds.right - bounds.left - gap * 3.0f) / 4.0f;

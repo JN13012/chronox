@@ -78,6 +78,7 @@ DashboardSnapshot queryDashboardSnapshot(
         queryHistory(database, CalendarPeriod::Year, now, converter);
 
     DashboardSnapshot snapshot;
+    snapshot.activityUncertainties=database.activityUncertaintyCount();
     constexpr CalendarPeriod periods[]{CalendarPeriod::Day,CalendarPeriod::Week,CalendarPeriod::Month,CalendarPeriod::Year};
     for(std::size_t i=0;i<4;++i) {
         const auto a=database.queryActivity(periods[i],now,converter);
@@ -91,7 +92,7 @@ DashboardSnapshot queryDashboardSnapshot(
     snapshot.capturedAt = now;
     snapshot.todayIntervals = day.sessionIntervals;
     snapshot.trackingActive = trackingActive;
-    snapshot.timeUncertain = database.uncertaintyCount()!=0;
+    snapshot.timeUncertain = database.uncertaintyCount()!=0 || database.activityUncertaintyCount()!=0;
 
     Timestamp dayStart = week.range.start;
     for (std::size_t index = 0; index < snapshot.weekDays.size(); ++index) {
@@ -149,7 +150,7 @@ DashboardHistorySnapshot queryDashboardHistory(
     snapshot.activityDuration=asSeconds(activity.duration); snapshot.activityMeasured=activity.measured;
     snapshot.daysWithActivity = report.daysWithDuration;
     snapshot.trackingActive = trackingActive;
-    snapshot.timeUncertain = database.uncertaintyCount()!=0;
+    snapshot.timeUncertain = database.uncertaintyCount()!=0 || database.activityUncertaintyCount()!=0;
     snapshot.sessions.reserve(report.sessionIntervals.size());
     for (std::size_t index = 0; index < report.sessionIntervals.size(); ++index) {
         const TimeRange interval = report.sessionIntervals[index];

@@ -1,5 +1,8 @@
 # Temporal engine V2
 
+P1.3.4 adds independent input activity and additive SQLite V3 storage; the V2
+session engine remains unchanged. See [ACTIVITY_ENGINE.md](ACTIVITY_ENGINE.md).
+
 UTC is a civil observation, never a duration. The native source supplies UTC,
 QPC and unbiased awake counters in microseconds. TemporalEngine consumes only
 injected samples, measures awake/unlocked time, and splits spans into epochs on

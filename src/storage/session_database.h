@@ -54,6 +54,7 @@ public:
     void updateTemporal(TemporalEngine& engine, bool durable, ActivityTracker* activity = nullptr);
     ActivityReport queryActivity(CalendarPeriod period, Timestamp anchor, const CalendarTimeConverter* converter = nullptr) const;
     Timestamp uncertaintyCount() const;
+    Timestamp activityUncertaintyCount() const;
     void backupTo(const std::filesystem::path& destination) const;
     Timestamp latestRecordedTimestamp() const;
     std::chrono::microseconds duration(CalendarPeriod period, Timestamp now) const;

@@ -31,6 +31,7 @@ struct DashboardSnapshot {
     std::array<bool,4> activityMeasured{};
     ActivityState activityState{ActivityState::Inactive};
     bool activityDetectionEnabled{true};
+    Timestamp activityUncertainties{};
     bool trackingActive{};
     bool timeUncertain{};
 };
