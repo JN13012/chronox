@@ -50,6 +50,7 @@ if(WIN32)
         windows/dashboard_window.cpp
         windows/main.cpp
         windows/windows_time_source.cpp
+        windows/windows_input_source.cpp
         windows/widget_presentation.cpp
         windows/widget_preferences.cpp
         windows/window_coordinator.cpp

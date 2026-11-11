@@ -7,6 +7,7 @@
 
 #include "../core/calendar_period.h"
 #include "windows_time_source.h"
+#include "windows_input_source.h"
 #include "../core/temporal_engine.h"
 #include "../core/temporal_diagnostics.h"
 #include "../storage/session_database.h"
@@ -154,14 +155,22 @@ int runChronox(bool startHidden,
     std::optional<chronox::TemporalEngine> engine;
     std::exception_ptr callbackError;
     bool stopped = false;
-    chronox::SessionDatabase database(databasePath(), chronox::StorageMode::Measured);
+    chronox::SessionDatabase database(databasePath(), chronox::StorageMode::Activity);
+    chronox::ActivityTracker activity;
+    chronox::Timestamp lastCheckpoint{};
     chronox::WidgetPreferences widgetPreferences;
     wchar_t diagnosticFlag[2]{};
     const bool diagnosticEnabled=GetEnvironmentVariableW(L"CHRONOX_TIME_DIAGNOSTICS",diagnosticFlag,2)==1 && diagnosticFlag[0]==L'1';
     chronox::TemporalDiagnostics diagnostics(diagnosticEnabled ? databasePath().parent_path()/L"time-diagnostics" : std::filesystem::path{});
+    const auto advanceActivity = [&](const auto& operation) {
+        const auto before=engine->snapshot();
+        const auto civil=engine->current()?engine->current()->utcEnd:before.utc;
+        operation();
+        activity.advance(before,engine->snapshot(),civil,chronox::sampleWindowsInput());
+    };
     const auto observe = [&] {
-        engine->observe(chronox::sampleWindowsTime());
-        database.updateTemporal(*engine, false);
+        advanceActivity([&] { engine->observe(chronox::sampleWindowsTime()); });
+        database.updateTemporal(*engine, false, &activity);
         diagnostics.record(engine->snapshot(),"sample");
         return engine->snapshot();
     };
@@ -171,7 +180,7 @@ int runChronox(bool startHidden,
         if (stopped) {
             return;
         }
-        if (engine) { engine->stop(chronox::sampleWindowsTime()); database.updateTemporal(*engine, true); diagnostics.record(engine->snapshot(),"stop"); }
+        if (engine) { advanceActivity([&] { engine->stop(chronox::sampleWindowsTime()); }); activity.stop(); database.updateTemporal(*engine, true, &activity); diagnostics.record(engine->snapshot(),"stop"); }
         stopped = true;
     };
 
@@ -217,12 +226,16 @@ int runChronox(bool startHidden,
         [&](SessionEvent event) {
             try {
                 if (!engine) return;
+                advanceActivity([&] {
                 engine->event(event, chronox::sampleWindowsTime());
                 if (event == SessionEvent::Resumed ||
                     (event == SessionEvent::Unlocked && engine->snapshot().uncertain)) {
                     engine->reconcile(chronox::WindowsSessionMonitor::queryInitiallyLocked(), chronox::sampleWindowsTime());
                 }
-                database.updateTemporal(*engine, true);
+                });
+                if(event==SessionEvent::Suspended) activity.setState(chronox::ActivityState::Sleeping);
+                if(event==SessionEvent::Locked) activity.setState(chronox::ActivityState::Locked);
+                database.updateTemporal(*engine, true, &activity);
                 diagnostics.record(engine->snapshot(), event==SessionEvent::Suspended ? "suspended" : event==SessionEvent::Resumed ? "resumed" : event==SessionEvent::Locked ? "locked" : "unlocked");
                 if (widget != nullptr) {
                     widget->refresh();
@@ -236,26 +249,33 @@ int runChronox(bool startHidden,
         [&] {
             try {
                 if (!engine) return;
-                engine->observe(chronox::sampleWindowsTime());
-                database.updateTemporal(*engine, true);
-                diagnostics.record(engine->snapshot(),"checkpoint");
-                if (widget != nullptr) {
-                    widget->refresh();
+                const auto previousActivityState=activity.state();
+                const auto state=observe();
+                const bool checkpointDue=state.sample.steady-lastCheckpoint>=60'000'000;
+                if(checkpointDue) {
+                    database.updateTemporal(*engine, true, &activity);
+                    lastCheckpoint=state.sample.steady;
+                    diagnostics.record(state,"checkpoint");
                 }
-                windowCoordinator.refreshDashboard();
+                if(checkpointDue || previousActivityState!=activity.state()) {
+                    if(widget) widget->refresh();
+                    windowCoordinator.refreshDashboard();
+                }
             } catch (...) {
                 captureError(std::current_exception());
             }
         },
         [&] {
-            try { if (engine) { observe(); database.updateTemporal(*engine, true); diagnostics.record(engine->snapshot(),"time-change"); } }
+            try { if (engine) { observe(); database.updateTemporal(*engine, true, &activity); diagnostics.record(engine->snapshot(),"time-change"); } }
             catch (...) { captureError(std::current_exception()); }
         });
 
     monitor.start();
     const bool initiallyLocked = chronox::WindowsSessionMonitor::queryInitiallyLocked();
     engine.emplace(initiallyLocked, chronox::sampleWindowsTime());
-    database.updateTemporal(*engine, true);
+    activity.advance(engine->snapshot(),engine->snapshot(),engine->snapshot().utc,chronox::sampleWindowsInput());
+    database.updateTemporal(*engine, true, &activity);
+    lastCheckpoint=engine->snapshot().sample.steady;
     diagnostics.record(engine->snapshot(),"startup");
 
     try {

@@ -95,7 +95,7 @@ void WindowsSessionMonitor::start() {
         throw windowsError("RegisterSuspendResumeNotification", error);
     }
 
-    if (SetTimer(window, TimerId, 60'000, nullptr) == 0) {
+    if (SetTimer(window, TimerId, 1'000, nullptr) == 0) {
         const DWORD error = GetLastError();
         releaseWindowResources(window_);
         destroyWindow();
