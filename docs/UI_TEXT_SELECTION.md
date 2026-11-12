@@ -2,7 +2,7 @@
 
 12 novembre 2026.
 
-- Durées de la semaine centrées horizontalement au-dessus du sommet de chaque barre bleue, y compris les valeurs nulles. Les jours sont centrés sur le même axe. Les calculs et formats de durée restent identiques.
+- Les sept durées de la semaine partagent une même ordonnée en haut du graphique, au-dessus des pistes sombres, indépendamment de la hauteur des barres bleues et y compris pour les valeurs nulles. Chaque durée est centrée horizontalement sur sa barre. Les jours sont centrés sur le même axe. Les calculs et formats de durée restent identiques.
 - Sur un texte de lecture du dashboard, un clic sélectionne le bloc complet. Un glissement sélectionne des caractères dans ce bloc, avec surbrillance suivant les positions DirectWrite. Ctrl+C ou Ctrl+Inser copie la sélection en Unicode ; Ctrl+A sélectionne le bloc entier ; Échap efface d'abord la sélection.
 - Les boutons, onglets, cellules de calendrier navigables et contrôles natifs conservent leur comportement. La sélection ne traverse pas plusieurs blocs. Le widget n'est pas modifié.
 - La sélection est effacée lors d'un changement de page, d'un défilement, d'un redimensionnement ou si le texte sélectionné change au rafraîchissement. Un texte masqué par le viewport n'est pas sélectionnable. Le presse-papiers n'est modifié qu'à la demande de copie de l'utilisateur.
@@ -22,6 +22,6 @@ Preuves : `build/ui-text-selection/ctest.xml`, mesures `visible-before-*` / `vis
 .\scripts\review-dashboard.ps1 -Page Overview -Width 1050 -Height 700 -State reference
 ```
 
-Le banc affiche des données fictives sans SQLite ni préférences utilisateur. Faire défiler jusqu'au graphique : les sept durées doivent être centrées sur les sept barres. Cliquer un compteur ou une légende, vérifier sa surbrillance, puis Ctrl+C et coller manuellement dans un éditeur. Vérifier aussi un glissement partiel, Ctrl+A, Échap et la navigation des trois pages. Répéter à 720×520. Les textes des boutons restent des actions ; ils ne doivent pas être capturés par la sélection.
+Le banc affiche des données fictives sans SQLite ni préférences utilisateur. Faire défiler jusqu'au graphique : les sept durées doivent être centrées sur les sept barres et alignées sur une même ligne en haut. Cliquer un compteur ou une légende, vérifier sa surbrillance, puis Ctrl+C et coller manuellement dans un éditeur. Vérifier aussi un glissement partiel, Ctrl+A, Échap et la navigation des trois pages. Répéter à 720×520. Les textes des boutons restent des actions ; ils ne doivent pas être capturés par la sélection.
 
 Le déploiement réel, ses sauvegardes et ses vérifications sont consignés séparément sous `deployment-archives/ui-selection-20261112/`.

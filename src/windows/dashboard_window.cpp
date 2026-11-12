@@ -941,8 +941,8 @@ struct DashboardWindow::Impl {
             const std::wstring amount = std::to_wstring(totalMinutes / 60) + L"h" +
                 (totalMinutes % 60 < 10 ? L"0" : L"") + std::to_wstring(totalMinutes % 60);
             drawText(amount.c_str(), compactNavFormat.Get(), textBrush.Get(),
-                D2D1::RectF(center-slotWidth/2, chartBottom-valueHeight-18,
-                            center+slotWidth/2, chartBottom-valueHeight-2),DWRITE_TEXT_ALIGNMENT_CENTER);
+                D2D1::RectF(center-slotWidth/2, chartTop-18,
+                            center+slotWidth/2, chartTop-2),DWRITE_TEXT_ALIGNMENT_CENTER);
             drawText(labels[index], compactNavFormat.Get(), textBrush.Get(),
                      D2D1::RectF(center - slotWidth / 2.0f, chartBottom + 3.0f,
                                  center + slotWidth / 2.0f, bounds.bottom - 2.0f),DWRITE_TEXT_ALIGNMENT_CENTER);
