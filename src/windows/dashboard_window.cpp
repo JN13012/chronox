@@ -1,6 +1,8 @@
 #include "dashboard_window.h"
 
 #include "resource.h"
+#include "dashboard_layout.h"
+#include "ui_text.h"
 
 #include <windows.h>
 #include <windowsx.h>
@@ -27,11 +29,11 @@ namespace {
 using Microsoft::WRL::ComPtr;
 
 constexpr wchar_t DashboardClassName[] = L"ChronoxDashboardWindow";
-constexpr float SidebarExpandedWidth = 232.0f;
-constexpr float SidebarCompactWidth = 72.0f;
-constexpr float CompactLayoutThreshold = 820.0f;
-constexpr float InitialClientWidth = 1050.0f;
-constexpr float InitialClientHeight = 700.0f;
+constexpr float SidebarExpandedWidth = ui::DashboardLayout::expandedSidebar;
+constexpr float SidebarCompactWidth = ui::DashboardLayout::compactSidebar;
+constexpr float CompactLayoutThreshold = ui::DashboardLayout::compactThreshold;
+constexpr float InitialClientWidth = ui::DashboardLayout::initialWidth;
+constexpr float InitialClientHeight = ui::DashboardLayout::initialHeight;
 constexpr UINT_PTR DashboardRefreshTimerId = 1;
 constexpr UINT DashboardRefreshIntervalMs = 15'000;
 constexpr std::size_t MaximumHistoryHitTargets = 56;
@@ -63,8 +65,8 @@ void checkHr(HRESULT result, const char* operation) {
     }
 }
 
-D2D1_COLOR_F color(BYTE red, BYTE green, BYTE blue) {
-    return D2D1::ColorF(red / 255.0f, green / 255.0f, blue / 255.0f);
+D2D1_COLOR_F color(ui::Rgb c) {
+    return D2D1::ColorF(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f);
 }
 
 std::wstring formatDuration(std::chrono::seconds duration) {
@@ -495,21 +497,16 @@ struct DashboardWindow::Impl {
     }
 
     void createTextFormats() {
-        const auto create = [&](float size, DWRITE_FONT_WEIGHT weight,
-                                ComPtr<IDWriteTextFormat>& format) {
-            checkHr(writeFactory->CreateTextFormat(
-                        L"Segoe UI", nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
-                        DWRITE_FONT_STRETCH_NORMAL, size, L"fr-FR", &format),
-                    "IDWriteFactory::CreateTextFormat(dashboard)");
-            checkHr(format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP),
-                    "IDWriteTextFormat::SetWordWrapping(dashboard)");
+        const auto create = [&](ui::TextStyle style, ComPtr<IDWriteTextFormat>& format) {
+            checkHr(ui::createTextFormat(writeFactory.Get(), style, &format),
+                    "createTextFormat(dashboard)");
         };
-        create(11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, brandFormat);
-        create(11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, pageFormat);
-        create(28.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, titleFormat);
-        create(14.0f, DWRITE_FONT_WEIGHT_NORMAL, bodyFormat);
-        create(14.0f, DWRITE_FONT_WEIGHT_MEDIUM, navFormat);
-        create(10.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, compactNavFormat);
+        create(ui::type::brand, brandFormat);
+        create(ui::type::page, pageFormat);
+        create(ui::type::title, titleFormat);
+        create(ui::type::body, bodyFormat);
+        create(ui::type::nav, navFormat);
+        create(ui::type::compact, compactNavFormat);
     }
 
     void createRenderTarget() {
@@ -530,31 +527,31 @@ struct DashboardWindow::Impl {
     }
 
     void createBrushes() {
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x10, 0x17, 0x22),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::background),
                                                      &backgroundBrush),
                 "CreateSolidColorBrush(dashboard background)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x15, 0x20, 0x2F),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::sidebar),
                                                      &sidebarBrush),
                 "CreateSolidColorBrush(dashboard sidebar)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x1D, 0x2A, 0x3C),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::panel),
                                                      &panelBrush),
                 "CreateSolidColorBrush(dashboard panel)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x24, 0x35, 0x4B),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::hover),
                                                      &panelHoverBrush),
                 "CreateSolidColorBrush(dashboard panel hover)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x24, 0x8D, 0xFF),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::accent),
                                                      &accentBrush),
                 "CreateSolidColorBrush(dashboard accent)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x54, 0xD7, 0xF5),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::cyan),
                                                      &cyanBrush),
                 "CreateSolidColorBrush(dashboard cyan)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0xCA, 0xD7, 0xE4),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::text),
                                                      &textBrush),
                 "CreateSolidColorBrush(dashboard text)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x91, 0xA1, 0xB4),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::muted),
                                                      &mutedBrush),
                 "CreateSolidColorBrush(dashboard muted text)");
-        checkHr(renderTarget->CreateSolidColorBrush(color(0x30, 0x40, 0x54),
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::border),
                                                      &borderBrush),
                 "CreateSolidColorBrush(dashboard border)");
     }
@@ -586,7 +583,7 @@ struct DashboardWindow::Impl {
             return;
         }
         renderTarget->BeginDraw();
-        renderTarget->Clear(color(0x10, 0x17, 0x22));
+        renderTarget->Clear(color(ui::palette::background));
         drawSidebar();
         drawContent();
         const HRESULT result = renderTarget->EndDraw();
@@ -1545,8 +1542,7 @@ struct DashboardWindow::Impl {
     }
 
     float sidebarWidth(float width) const {
-        return width < CompactLayoutThreshold ? SidebarCompactWidth
-                                              : SidebarExpandedWidth;
+        return ui::DashboardLayout{width, 0}.sidebar();
     }
 
     void drawSidebar() {
@@ -1671,7 +1667,7 @@ struct DashboardWindow::Impl {
     void drawContent() {
         const D2D1_SIZE_F size = clientSize();
         const float left = sidebarWidth(size.width);
-        const float padding = size.width < 760.0f ? 20.0f : 36.0f;
+        const float padding = ui::DashboardLayout{size.width, size.height}.padding();
         const float contentLeft = left + padding;
         const float contentRight = size.width - padding;
         const float contentWidth = std::max(0.0f, contentRight - contentLeft);
@@ -1698,7 +1694,7 @@ struct DashboardWindow::Impl {
         }
         const auto panel = D2D1::RoundedRect(
             D2D1::RectF(contentLeft, panelTop, contentRight, panelBottom),
-            14.0f, 14.0f);
+            ui::space::panelRadius, ui::space::panelRadius);
         renderTarget->FillRoundedRectangle(panel, panelBrush.Get());
         renderTarget->DrawRoundedRectangle(panel, borderBrush.Get(), 1.0f);
 
