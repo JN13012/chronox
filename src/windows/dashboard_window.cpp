@@ -779,20 +779,31 @@ struct DashboardWindow::Impl {
         drawSelectableText(value,nullptr,textBrush.Get(),bounds,DWRITE_TEXT_ALIGNMENT_LEADING,true);
     }
 
+    std::array<std::wstring,4> metricDetails() const {
+        return {L"Session du jour local", std::to_wstring(snapshot.daysWithSession[1])+L" jours avec session",
+            L"Moy./jour : "+ui::compactDuration(snapshot.monthDailyAverage),
+            std::to_wstring(snapshot.daysWithSession[3])+L" jours avec session"};
+    }
+
+    void showMetricDefinitions() {
+        MessageBoxW(window,L"Session : somme des contributions comptabilisées dans la période locale.\nJours avec session : jours locaux dont la durée est strictement positive.\nMoyenne mensuelle : temps de session / jours avec session positive.\nActivité : clavier/souris uniquement pendant les portions couvertes par V3. Une absence de mesure ne signifie pas zéro activité. La couverture peut être partielle. Aucun taux n'est extrapolé.\nIncertain : une anomalie de mesure a été signalée ; consulter Historique pour les détails.",L"Définition des indicateurs",MB_OK|MB_ICONINFORMATION);
+    }
+
+    std::array<std::wstring,4> overviewSizingDetails{};
     const ui::MetricCardLayout& overviewCardSizing(float width) {
         const std::array<std::chrono::seconds,8> durations{snapshot.todayDuration,snapshot.weekDuration,
             snapshot.monthDuration,snapshot.yearDuration,snapshot.activityDurations[0],
             snapshot.activityDurations[1],snapshot.activityDurations[2],snapshot.activityDurations[3]};
         if (width==overviewSizingWidth && durations==overviewSizingDurations &&
-            snapshot.activityMeasured==overviewSizingMeasured) return overviewSizing;
+            snapshot.activityMeasured==overviewSizingMeasured && metricDetails()==overviewSizingDetails) return overviewSizing;
         std::array<std::wstring,4> values,activity;
         for (int i=0;i<4;++i) {
             values[i]=ui::compactDuration(durations[i]);
-            activity[i]=std::wstring(L"Clavier/souris : ")+
-                (snapshot.activityMeasured[i]?ui::compactDuration(durations[i+4]):L"non mesur\u00e9e");
+            activity[i]=metricDetails()[i];
         }
         checkHr(ui::measureResponsiveMetricCards(writeFactory.Get(),values,activity,width,overviewSizing),
                 "Measure compact dashboard cards");
+        overviewSizingDetails=metricDetails();
         overviewSizingWidth=width; overviewSizingDurations=durations;
         overviewSizingMeasured=snapshot.activityMeasured;
         return overviewSizing;
@@ -807,7 +818,7 @@ struct DashboardWindow::Impl {
         case ActivityState::Sleeping: activityLabel = L"Veille"; break;
         case ActivityState::Uncertain: activityLabel = L"Mesure incertaine"; break;
         }
-        const auto status = ui::trackingStatus(snapshot.trackingActive, activityLabel, snapshot.activityDetectionEnabled);
+        const auto status = std::wstring(snapshot.activityDetectionEnabled ? activityLabel : L"Détection désactivée") + (snapshot.timeUncertain ? L" · Incertain" : L"") + L" · F1";
         drawText(status.c_str(),labelFormat.Get(),mutedBrush.Get(),
             D2D1::RectF(left,top,right,top+34),DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
@@ -835,13 +846,18 @@ struct DashboardWindow::Impl {
                      D2D1::RectF(x + 40, y + 8, x + cardWidth - 12, y + 25));
             drawMetric(ui::compactDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
                 x + cardWidth - 12, y + sizing.valueTop + sizing.valueHeight));
-            const std::wstring activityText = std::wstring(L"Clavier/souris : ") +
-                (snapshot.activityMeasured[i] ? ui::compactDuration(snapshot.activityDurations[i]) : L"non mesur\u00e9e");
+            const std::wstring activityText = metricDetails()[i];
             drawText(activityText.c_str(), activityFormat.Get(), cyanBrush.Get(),
                      D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
                                 y + sizing.activityTop() + sizing.activityHeight));
         }
-        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap;
+        const float activityTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap;
+        drawCard(D2D1::RectF(left,activityTop,right,activityTop+62));
+        const auto measured = [&](int i) { return snapshot.activityMeasured[i] ? ui::compactDuration(snapshot.activityDurations[i]) : L"Non mesurée"; };
+        const auto activity = L"Clavier/souris  ·  Aujourd'hui : " + measured(0) + L"  ·  Semaine : " + measured(1);
+        drawText(activity.c_str(),activityFormat.Get(),cyanBrush.Get(),D2D1::RectF(left+12,activityTop+7,right-12,activityTop+39));
+        drawText(L"Couverture limitée aux portions mesurées · Détails : F1",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(left+12,activityTop+40,right-12,activityTop+58));
+        const float chartsTop = activityTop + 62 + gap;
         const float chartHeight=ui::DashboardLayout::chartHeight(clientSize().height);
         const bool stacked=ui::DashboardLayout::stackedCharts(width);
         const float chartWidth = stacked?width:(width-gap)/2;
@@ -2176,6 +2192,7 @@ struct DashboardWindow::Impl {
                                  static_cast<int>(dpi));
             const int y = MulDiv(GET_Y_LPARAM(lParam), 96,
                                  static_cast<int>(dpi));
+            if (activePage==DashboardPage::Overview && y<60 && x>sidebarWidth(clientSize().width)+180) { showMetricDefinitions(); return 0; }
             const int selected = hitTestPage(x, y);
             if (selected >= 0) {
                 selectPage(selected);
@@ -2233,6 +2250,7 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_KEYDOWN:
+            if (wParam == VK_F1) { showMetricDefinitions(); return 0; }
             if (GetKeyState(VK_CONTROL)&0x8000) {
                 if ((wParam=='C' || wParam==VK_INSERT) && textSelection.hasSelection()) { copySelectedText(); return 0; }
                 if (wParam=='A') { textSelection.selectAll(); render(); return 0; }

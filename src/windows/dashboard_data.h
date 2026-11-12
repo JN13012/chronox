@@ -22,6 +22,8 @@ struct DashboardSnapshot {
     std::chrono::seconds weekDuration{};
     std::chrono::seconds monthDuration{};
     std::chrono::seconds yearDuration{};
+    std::array<std::size_t,4> daysWithSession{};
+    std::chrono::seconds monthDailyAverage{};
     TimeRange todayRange{};
     Timestamp capturedAt{};
     std::vector<TimeRange> todayIntervals;

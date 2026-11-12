@@ -141,6 +141,8 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
             "monthly total is read from the database for the current local month");
     require(snapshot.yearDuration == 510min,
             "year total includes this year's history and excludes the prior year");
+    require(snapshot.daysWithSession[1] == 4 && snapshot.daysWithSession[2] == 5 && snapshot.monthDailyAverage == 90min, "session days and monthly average use positive local days");
+    require(!snapshot.activityMeasured[0], "legacy activity is unavailable, never measured zero");
     require(snapshot.todayIntervals.size() == 3,
             "today's timeline contains clipped and active counted intervals");
     const auto todayHistory = chronox::queryDashboardHistory(

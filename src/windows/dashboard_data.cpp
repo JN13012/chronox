@@ -84,6 +84,8 @@ DashboardSnapshot queryDashboardSnapshot(
         const auto a=database.queryActivity(periods[i],now,converter);
         snapshot.activityDurations[i]=asSeconds(a.duration); snapshot.activityMeasured[i]=a.measured;
     }
+    snapshot.daysWithSession = {day.daysWithDuration, week.daysWithDuration, month.daysWithDuration, year.daysWithDuration};
+    if (month.daysWithDuration) snapshot.monthDailyAverage = asSeconds(month.sessionDuration / month.daysWithDuration);
     snapshot.todayDuration = asSeconds(day.sessionDuration);
     snapshot.weekDuration = asSeconds(week.sessionDuration);
     snapshot.monthDuration = asSeconds(month.sessionDuration);
