@@ -22,9 +22,11 @@ struct DashboardLayout {
     constexpr float left() const { return sidebar() + padding(); }
     constexpr float right() const { return width - padding(); }
     constexpr float innerWidth() const { return right() - left() - 28; }
+    constexpr float statusLeft() const { return left() + 180; }
+    constexpr float statusWidth() const { return right() - statusLeft(); }
     static constexpr int metricColumns(float available) { return available >= 1000 ? 4 : 2; }
     static constexpr float metricHeight = MetricCardLayout{}.height(), gap = space::md;
-    static constexpr float overviewStatusHeight = 40;
+    static constexpr float overviewStatusHeight = 0;
     static constexpr float metricsHeight(float available, float cardHeight = metricHeight) {
         return cardHeight * (4 / metricColumns(available)) +
                gap * (4 / metricColumns(available) - 1);

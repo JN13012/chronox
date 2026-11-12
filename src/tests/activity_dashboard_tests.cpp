@@ -104,11 +104,18 @@ int main() try {
                 check(GetCapture()!=own);
                 SendMessageW(own,WM_KEYDOWN,VK_ESCAPE,0);
                 check(IsWindowVisible(own)); // first Escape clears text, not the dashboard
+                BYTE pageKeys[256]{},controlKeys[256]{}; check(GetKeyboardState(pageKeys));
+                std::copy(std::begin(pageKeys),std::end(pageKeys),std::begin(controlKeys));
+                controlKeys[VK_CONTROL]=0x80; check(SetKeyboardState(controlKeys));
+                SendMessageW(own,WM_KEYDOWN,'A',0); // select whole page without a pre-existing selection
+                check(SetKeyboardState(pageKeys));
                 SendMessageW(own,WM_VSCROLL,SB_BOTTOM,0);
                 SCROLLINFO info{sizeof(info),SIF_ALL}; check(GetScrollInfo(own,SB_VERT,&info));
                 check(info.nPos==std::max(0,info.nMax-static_cast<int>(info.nPage)+1));
                 SendMessageW(own,WM_VSCROLL,SB_TOP,0);
                 check(GetScrollInfo(own,SB_VERT,&info)); check(info.nPos==0);
+                SendMessageW(own,WM_KEYDOWN,VK_ESCAPE,0);
+                check(IsWindowVisible(own)); // scrolling preserved the page selection
                 if(error) std::rethrow_exception(error);
             }
         }

@@ -79,6 +79,37 @@ int main() try {
         require(selection.highlights().size()>1,"Wrapped selection must highlight every line");
         selection.beginFrame(); selection.endFrame();
         require(selection.copyText().empty(),"Hidden page cannot retain selected text");
+        selection.beginFrame();
+        selection.append(factory.Get(),L"Premier bloc",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,20,clip);
+        auto& second=selection.append(factory.Get(),L"Ligne suivante",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,60,clip);
+        auto* secondLayout=second.layout.Get();
+        selection.append(factory.Get(),L"Bas de page",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,500,clip);
+        selection.endFrame();
+        require(selection.beginSelection(11,28),"First block hit");
+        secondLayout->HitTestTextPosition(5,FALSE,&x,&y,&hit);
+        require(selection.drag(10+x+.01f,60+y+hit.height/2),"Drag must reach another block");
+        require(selection.copyText()==L"Premier bloc\r\nLigne","Cross-block copy must follow reading order");
+        selection.selectAll();
+        const std::wstring page=L"Premier bloc\r\nLigne suivante\r\nBas de page";
+        require(selection.copyText()==page,"Select all must include page text below viewport");
+        selection.beginFrame();
+        selection.append(factory.Get(),L"Premier bloc",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,0,clip);
+        selection.append(factory.Get(),L"Ligne suivante",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,40,clip);
+        selection.append(factory.Get(),L"Bas de page",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,480,clip);
+        selection.endFrame();
+        require(selection.copyText()==page,"Scrolling must preserve page selection");
+        selection.beginFrame();
+        selection.append(factory.Get(),L"Premier bloc",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,0,clip);
+        selection.append(factory.Get(),L"Valeur actualis\u00e9e",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,40,clip);
+        require(selection.endFrame() && !selection.hasSelection(),"Changed page selection must clear and request repaint");
         ComPtr<IDWriteTextFormat> barFormat;
         require(SUCCEEDED(createTextFormat(factory.Get(),type::compact,&barFormat)),"Bar label format");
         for(float slot : {30.f,45.f,100.f}) for(const auto* value : {L"0h00",L"2h15",L"11h06"}) {
@@ -106,10 +137,10 @@ int main() try {
             if (m.width > w+.1f || m.height > h+.1f)
                 throw std::runtime_error("An availability/state annotation would be truncated");
         };
-        checkAnnotation(trackingStatus(false,L"Mesure incertaine",false),type::label,layout.innerWidth()-26,33);
+        checkAnnotation(trackingStatus(false,L"Mesure incertaine",false),type::label,layout.statusWidth(),34);
         checkAnnotation(L"Session : lundi au dimanche",type::label,(layout.innerWidth()-DashboardLayout::gap)/2-20,17);
         checkAnnotation(L"2562047788015215 h 30 min 7 s",type::label,(layout.innerWidth()-24)*.36f+2,34);
-        checkAnnotation(L"Activit\u00e9 : 2562047788015215 h 30 min 7 s",type::activity,card-24,38);
+        checkAnnotation(L"Clavier/souris : 2562047788015215 h 30 min 7 s",type::activity,card-24,38);
         for (const auto* value : {L"0 h 00 min 0 s", L"1234 h 59 min 59 s",
                 L"999999 h 59 min 59 s", L"2562047788015215 h 30 min 7 s", L"Non mesur\u00e9e"}) {
             ComPtr<IDWriteTextLayout> text;
@@ -122,13 +153,13 @@ int main() try {
                 throw std::runtime_error("DirectWrite metrics exceed the card");
         }
         const std::wstring usual[]{L"2 h 53 min 44 s",L"27 h 19 min 46 s",L"75 h 50 min 15 s",L"81 h 17 min 3 s"};
-        const std::wstring activity[]{L"Activit\u00e9 : 2 h 08 min 48 s",L"Activit\u00e9 : non mesur\u00e9e"};
+        const std::wstring activity[]{L"Clavier/souris : 2 h 08 min 48 s",L"Clavier/souris : non mesur\u00e9e"};
         MetricCardLayout compact;
         if (FAILED(measureMetricCards(factory.Get(),usual,activity,card-24,compact)) ||
             compact.height()>=154 || compact.activityTop()<compact.valueTop+compact.valueHeight)
             throw std::runtime_error("Ordinary cards must be compact without overlap");
         const std::wstring huge[]{L"2562047788015215 h 30 min 7 s"};
-        const std::wstring hugeActivity[]{L"Activit\u00e9 : 2562047788015215 h 30 min 7 s"};
+        const std::wstring hugeActivity[]{L"Clavier/souris : 2562047788015215 h 30 min 7 s"};
         MetricCardLayout expanded;
         if (FAILED(measureMetricCards(factory.Get(),huge,hugeActivity,card-24,expanded)))
             throw std::runtime_error("Long totals must retain adaptive space");

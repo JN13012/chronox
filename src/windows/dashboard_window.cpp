@@ -638,7 +638,7 @@ struct DashboardWindow::Impl {
         renderTarget->FillRectangle(D2D1::RectF(0, 0, clientSize().width, clientSize().height), canvasGradient.Get());
         drawSidebar();
         drawContent();
-        textSelection.endFrame();
+        const bool selectionInvalidated=textSelection.endFrame();
         const HRESULT result = renderTarget->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
             renderTarget.Reset();
@@ -659,6 +659,7 @@ struct DashboardWindow::Impl {
             return;
         }
         checkHr(result, "ID2D1RenderTarget::EndDraw(dashboard)");
+        if (selectionInvalidated) InvalidateRect(window,nullptr,FALSE);
     }
 
     void cancelTextSelection() {
@@ -786,7 +787,7 @@ struct DashboardWindow::Impl {
         std::array<std::wstring,4> values,activity;
         for (int i=0;i<4;++i) {
             values[i]=formatDuration(durations[i]);
-            activity[i]=std::wstring(L"Activit\u00e9 : ")+
+            activity[i]=std::wstring(L"Clavier/souris : ")+
                 (snapshot.activityMeasured[i]?formatDuration(durations[i+4]):L"non mesur\u00e9e");
         }
         const int columns=ui::DashboardLayout::metricColumns(width);
@@ -798,8 +799,7 @@ struct DashboardWindow::Impl {
         return overviewSizing;
     }
 
-    void drawOverview(float left, float right, float top, float bottom) {
-        if (right <= left || bottom <= top) return;
+    void drawTrackingStatus(float left, float right, float top) {
         const wchar_t* activityLabel = L"Inactif";
         switch (snapshot.activityState) {
         case ActivityState::Active: activityLabel = L"Actif"; break;
@@ -809,11 +809,12 @@ struct DashboardWindow::Impl {
         case ActivityState::Uncertain: activityLabel = L"Mesure incertaine"; break;
         }
         const auto status = ui::trackingStatus(snapshot.trackingActive, activityLabel, snapshot.activityDetectionEnabled);
-        const bool active = snapshot.activityState == ActivityState::Active;
-        renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(left+4,top+12),4,4),
-                                  active ? cyanBrush.Get() : mutedBrush.Get());
-        drawText(status.c_str(), labelFormat.Get(), textBrush.Get(),
-                 D2D1::RectF(left + 16, top + 2, right - 10, top + 35));
+        drawText(status.c_str(),labelFormat.Get(),mutedBrush.Get(),
+            D2D1::RectF(left,top,right,top+34),DWRITE_TEXT_ALIGNMENT_TRAILING);
+    }
+
+    void drawOverview(float left, float right, float top, float bottom) {
+        if (right <= left || bottom <= top) return;
         const float width = right - left;
         const float gap = ui::DashboardLayout::gap;
         const int columns = ui::DashboardLayout::metricColumns(width);
@@ -835,7 +836,7 @@ struct DashboardWindow::Impl {
                      D2D1::RectF(x + 12, y + 27, x + cardWidth - 12, y + 44));
             drawMetric(formatDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
                 x + cardWidth - 12, y + sizing.valueTop + sizing.valueHeight));
-            const std::wstring activityText = std::wstring(L"Activit\u00e9 : ") +
+            const std::wstring activityText = std::wstring(L"Clavier/souris : ") +
                 (snapshot.activityMeasured[i] ? formatDuration(snapshot.activityDurations[i]) : L"non mesur\u00e9e");
             drawText(activityText.c_str(), activityFormat.Get(), cyanBrush.Get(),
                      D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
@@ -1818,7 +1819,6 @@ struct DashboardWindow::Impl {
     }
 
     void scrollContent(float delta) {
-        cancelTextSelection();
         auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
         scroll = std::clamp(scroll + delta, 0.f, maximumContentScroll);
         render();
@@ -1839,8 +1839,10 @@ struct DashboardWindow::Impl {
         drawText(L"CHRONOX  /  TABLEAU DE BORD", compactNavFormat.Get(),
                  mutedBrush.Get(),
                  D2D1::RectF(contentLeft, 28.0f, contentRight, 48.0f));
+        if (activePage==DashboardPage::Overview)
+            drawTrackingStatus(ui::DashboardLayout{size.width,size.height}.statusLeft(),contentRight,24);
         drawText(title, titleFormat.Get(), textBrush.Get(),
-                 D2D1::RectF(contentLeft, 54.0f, contentRight, 104.0f));
+                 D2D1::RectF(contentLeft, 60.0f, contentRight, 108.0f));
 
         const auto separator =
             D2D1::RectF(contentLeft, 112.0f, contentRight, 113.0f);
@@ -2185,7 +2187,6 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_VSCROLL: {
-            cancelTextSelection();
             const int action = LOWORD(wParam);
             if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) {
                 SCROLLINFO info{sizeof(SCROLLINFO), SIF_TRACKPOS};
@@ -2201,7 +2202,6 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_MOUSEWHEEL: {
-            cancelTextSelection();
             POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             ScreenToClient(hwnd, &point);
             const float y = point.y * 96.f / dpi;
@@ -2230,8 +2230,8 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_KEYDOWN:
-            if ((GetKeyState(VK_CONTROL)&0x8000) && textSelection.hasSelection()) {
-                if (wParam=='C' || wParam==VK_INSERT) { copySelectedText(); return 0; }
+            if (GetKeyState(VK_CONTROL)&0x8000) {
+                if ((wParam=='C' || wParam==VK_INSERT) && textSelection.hasSelection()) { copySelectedText(); return 0; }
                 if (wParam=='A') { textSelection.selectAll(); render(); return 0; }
             }
             if (wParam==VK_ESCAPE && textSelection.hasSelection()) {
