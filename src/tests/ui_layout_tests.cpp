@@ -106,10 +106,7 @@ int main() try {
             if (m.width > w+.1f || m.height > h+.1f)
                 throw std::runtime_error("An availability/state annotation would be truncated");
         };
-        checkAnnotation(coverageMessage(true),type::label,layout.innerWidth(),36);
-        checkAnnotation(coverageMessage(false),type::label,layout.innerWidth(),36);
-        checkAnnotation(uncertaintyMessage,type::label,layout.innerWidth(),36);
-        checkAnnotation(trackingStatus(false,L"Mesure incertaine",false),type::label,layout.innerWidth()-38,33);
+        checkAnnotation(trackingStatus(false,L"Mesure incertaine",false),type::label,layout.innerWidth()-26,33);
         checkAnnotation(L"Session : lundi au dimanche",type::label,(layout.innerWidth()-DashboardLayout::gap)/2-20,17);
         checkAnnotation(L"2562047788015215 h 30 min 7 s",type::label,(layout.innerWidth()-24)*.36f+2,34);
         checkAnnotation(L"Activit\u00e9 : 2562047788015215 h 30 min 7 s",type::activity,card-24,38);
@@ -124,6 +121,21 @@ int main() try {
             if (metrics.height > 64.1f || metrics.width > card - 23.9f)
                 throw std::runtime_error("DirectWrite metrics exceed the card");
         }
+        const std::wstring usual[]{L"2 h 53 min 44 s",L"27 h 19 min 46 s",L"75 h 50 min 15 s",L"81 h 17 min 3 s"};
+        const std::wstring activity[]{L"Activit\u00e9 : 2 h 08 min 48 s",L"Activit\u00e9 : non mesur\u00e9e"};
+        MetricCardLayout compact;
+        if (FAILED(measureMetricCards(factory.Get(),usual,activity,card-24,compact)) ||
+            compact.height()>=154 || compact.activityTop()<compact.valueTop+compact.valueHeight)
+            throw std::runtime_error("Ordinary cards must be compact without overlap");
+        const std::wstring huge[]{L"2562047788015215 h 30 min 7 s"};
+        const std::wstring hugeActivity[]{L"Activit\u00e9 : 2562047788015215 h 30 min 7 s"};
+        MetricCardLayout expanded;
+        if (FAILED(measureMetricCards(factory.Get(),huge,hugeActivity,card-24,expanded)))
+            throw std::runtime_error("Long totals must retain adaptive space");
+        ComPtr<IDWriteTextLayout> expandedText;
+        if (FAILED(createMetricLayout(factory.Get(),huge[0],card-24,expanded.valueHeight,&expandedText)))
+            throw std::runtime_error("Expanded total cannot fit");
+        checkAnnotation(hugeActivity[0],type::activity,card-24,expanded.activityHeight);
     }
 #endif
     std::cout << "Monotone layout 640..1600, selected contrast="

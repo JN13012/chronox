@@ -1,9 +1,11 @@
 #pragma once
 
 #include "ui_theme.h"
+#include "dashboard_layout.h"
 #include <dwrite.h>
 #include <wrl/client.h>
 #include <string>
+#include <span>
 
 namespace chronox::ui {
 inline HRESULT createTextFormat(IDWriteFactory* factory, TextStyle style,
@@ -39,5 +41,37 @@ inline HRESULT createMetricLayout(IDWriteFactory* factory, const std::wstring& v
         }
     }
     return E_BOUNDS;
+}
+
+// Compact by default, but reserve the actual extra line height for long totals.
+inline HRESULT measureMetricCards(IDWriteFactory* factory,
+        std::span<const std::wstring> values, std::span<const std::wstring> activity,
+        float textWidth, MetricCardLayout& result) {
+    MetricCardLayout measured;
+    for (const auto& value : values) {
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        HRESULT hr = createMetricLayout(factory,value,textWidth,40,&layout);
+        if (hr == E_BOUNDS) {
+            measured.valueHeight = 64;
+            hr = createMetricLayout(factory,value,textWidth,64,&layout);
+        }
+        if (FAILED(hr)) return hr;
+    }
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
+    HRESULT hr = createTextFormat(factory,type::activity,&format);
+    if (FAILED(hr)) return hr;
+    for (const auto& text : activity) {
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        hr = factory->CreateTextLayout(text.c_str(),static_cast<UINT32>(text.size()),
+                                      format.Get(),textWidth,38,&layout);
+        if (FAILED(hr)) return hr;
+        DWRITE_TEXT_METRICS metrics{};
+        hr = layout->GetMetrics(&metrics);
+        if (FAILED(hr)) return hr;
+        if (metrics.height > 38.1f || metrics.width > textWidth+.1f) return E_BOUNDS;
+        measured.activityHeight = std::max(measured.activityHeight,std::ceil(metrics.height));
+    }
+    result = measured;
+    return S_OK;
 }
 } // namespace chronox::ui

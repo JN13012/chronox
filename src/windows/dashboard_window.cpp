@@ -380,6 +380,10 @@ struct DashboardWindow::Impl {
     ui::DashboardTextSelection textSelection;
     D2D1_RECT_F textClip{};
     bool textDragging{};
+    float overviewSizingWidth{-1};
+    std::array<std::chrono::seconds,8> overviewSizingDurations{};
+    std::array<bool,4> overviewSizingMeasured{};
+    ui::MetricCardLayout overviewSizing;
     D2D1_RECT_F historyDetailsBounds{};
     HFONT settingsFont{};
 
@@ -592,6 +596,7 @@ struct DashboardWindow::Impl {
     }
 
     void releaseRenderResources() noexcept {
+        overviewSizingWidth=-1;
         textSelection.clearCache();
         renderTarget.Reset();
         metalGradient.Reset();
@@ -772,14 +777,25 @@ struct DashboardWindow::Impl {
         drawSelectableText(value,nullptr,textBrush.Get(),bounds,DWRITE_TEXT_ALIGNMENT_LEADING,true);
     }
 
-    void drawMeasurementNotice(float left, float right, float top, bool measured, bool uncertain) {
-        const wchar_t* coverage = ui::coverageMessage(measured);
-        drawText(coverage, labelFormat.Get(), mutedBrush.Get(),
-                 D2D1::RectF(left, top, right, top + 36));
-        if (uncertain) {
-            drawText(ui::uncertaintyMessage,
-                     labelFormat.Get(), cyanBrush.Get(), D2D1::RectF(left, top + 38, right, top + 74));
+    const ui::MetricCardLayout& overviewCardSizing(float width) {
+        const std::array<std::chrono::seconds,8> durations{snapshot.todayDuration,snapshot.weekDuration,
+            snapshot.monthDuration,snapshot.yearDuration,snapshot.activityDurations[0],
+            snapshot.activityDurations[1],snapshot.activityDurations[2],snapshot.activityDurations[3]};
+        if (width==overviewSizingWidth && durations==overviewSizingDurations &&
+            snapshot.activityMeasured==overviewSizingMeasured) return overviewSizing;
+        std::array<std::wstring,4> values,activity;
+        for (int i=0;i<4;++i) {
+            values[i]=formatDuration(durations[i]);
+            activity[i]=std::wstring(L"Activit\u00e9 : ")+
+                (snapshot.activityMeasured[i]?formatDuration(durations[i+4]):L"non mesur\u00e9e");
         }
+        const int columns=ui::DashboardLayout::metricColumns(width);
+        const float cardWidth=(width-ui::DashboardLayout::gap*(columns-1))/columns;
+        checkHr(ui::measureMetricCards(writeFactory.Get(),values,activity,cardWidth-24,overviewSizing),
+                "Measure compact dashboard cards");
+        overviewSizingWidth=width; overviewSizingDurations=durations;
+        overviewSizingMeasured=snapshot.activityMeasured;
+        return overviewSizing;
     }
 
     void drawOverview(float left, float right, float top, float bottom) {
@@ -793,39 +809,39 @@ struct DashboardWindow::Impl {
         case ActivityState::Uncertain: activityLabel = L"Mesure incertaine"; break;
         }
         const auto status = ui::trackingStatus(snapshot.trackingActive, activityLabel, snapshot.activityDetectionEnabled);
-        drawCard(D2D1::RectF(left, top, right, top + 36));
         const bool active = snapshot.activityState == ActivityState::Active;
-        renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(left+14,top+13),4,4),
+        renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(left+4,top+12),4,4),
                                   active ? cyanBrush.Get() : mutedBrush.Get());
         drawText(status.c_str(), labelFormat.Get(), textBrush.Get(),
-                 D2D1::RectF(left + 28, top + 2, right - 10, top + 35));
-        const bool measured = std::any_of(snapshot.activityMeasured.begin(), snapshot.activityMeasured.end(), [](bool v) { return v; });
-        drawMeasurementNotice(left, right, top + 38, measured, snapshot.timeUncertain);
+                 D2D1::RectF(left + 16, top + 2, right - 10, top + 35));
         const float width = right - left;
         const float gap = ui::DashboardLayout::gap;
         const int columns = ui::DashboardLayout::metricColumns(width);
         const float cardWidth = (width - gap * (columns - 1)) / columns;
-        const float metricsTop = top + 112;
+        const auto& sizing=overviewCardSizing(width);
+        const float metricsTop = top + ui::DashboardLayout::overviewStatusHeight;
         const std::array<std::wstring, 4> labels{L"Aujourd'hui", L"Cette semaine",
             formatMonthYear(snapshot.capturedAt), formatYear(snapshot.capturedAt)};
         const std::array<std::chrono::seconds, 4> values{snapshot.todayDuration,
             snapshot.weekDuration, snapshot.monthDuration, snapshot.yearDuration};
         for (int i = 0; i < 4; ++i) {
             const float x = left + (i % columns) * (cardWidth + gap);
-            const float y = metricsTop + (i / columns) * (ui::DashboardLayout::metricHeight + gap);
-            drawCard(D2D1::RectF(x, y, x + cardWidth, y + ui::DashboardLayout::metricHeight), i == 0);
+            const float y = metricsTop + (i / columns) * (sizing.height() + gap);
+            drawCard(D2D1::RectF(x, y, x + cardWidth, y + sizing.height()), i == 0);
             drawIcon(3, x+12, y+7, 20, cyanBrush.Get());
             drawText(labels[i].c_str(), labelFormat.Get(), cyanBrush.Get(),
                      D2D1::RectF(x + 40, y + 8, x + cardWidth - 12, y + 25));
             drawText(L"TEMPS DE SESSION", labelFormat.Get(), mutedBrush.Get(),
-                     D2D1::RectF(x + 12, y + 28, x + cardWidth - 12, y + 45));
-            drawMetric(formatDuration(values[i]), D2D1::RectF(x + 12, y + 46, x + cardWidth - 12, y + 110));
+                     D2D1::RectF(x + 12, y + 27, x + cardWidth - 12, y + 44));
+            drawMetric(formatDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
+                x + cardWidth - 12, y + sizing.valueTop + sizing.valueHeight));
             const std::wstring activityText = std::wstring(L"Activit\u00e9 : ") +
                 (snapshot.activityMeasured[i] ? formatDuration(snapshot.activityDurations[i]) : L"non mesur\u00e9e");
             drawText(activityText.c_str(), activityFormat.Get(), cyanBrush.Get(),
-                     D2D1::RectF(x + 12, y + 112, x + cardWidth - 12, y + 150));
+                     D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
+                                y + sizing.activityTop() + sizing.activityHeight));
         }
-        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width) + gap;
+        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height()) + gap;
         const float chartWidth = (width - gap) / 2;
         const auto timeline = D2D1::RectF(left, chartsTop, left + chartWidth, chartsTop + 180);
         const auto week = D2D1::RectF(left + chartWidth + gap, chartsTop, right, chartsTop + 180);
@@ -1629,11 +1645,10 @@ struct DashboardWindow::Impl {
         if (right <= left || bottom <= top) return;
         if (activeHistory == nullptr) loadHistory(false);
         historyHitCount = 0;
-        drawMeasurementNotice(left, right, top, activeHistory->activityMeasured, activeHistory->timeUncertain);
-        drawHistoryNavigation(D2D1::RectF(left, top + 84, right, top + 156));
-        drawHistorySummary(D2D1::RectF(left, top + 168, right, top + 344));
-        const auto chart = D2D1::RectF(left, top + 356, right, top + 592);
-        historyDetailsBounds = D2D1::RectF(left, top + 604, right, bottom);
+        drawHistoryNavigation(D2D1::RectF(left, top, right, top + 72));
+        drawHistorySummary(D2D1::RectF(left, top + 84, right, top + 260));
+        const auto chart = D2D1::RectF(left, top + 272, right, top + 508);
+        historyDetailsBounds = D2D1::RectF(left, top + 520, right, bottom);
         drawCard(chart); drawCard(historyDetailsBounds);
         if (historyPeriod == CalendarPeriod::Day) drawHistoryDayTimeline(chart);
         else drawHistoryBuckets(chart, historyPeriod == CalendarPeriod::Month);
@@ -1847,7 +1862,7 @@ struct DashboardWindow::Impl {
 
         const float available = std::max(1.f, panelBottom - panelTop - 20);
         const float required = activePage == DashboardPage::Overview
-            ? ui::DashboardLayout::overviewHeight(contentWidth - 28)
+            ? ui::DashboardLayout::overviewHeight(contentWidth - 28,overviewCardSizing(contentWidth-28).height())
             : activePage == DashboardPage::History ? ui::DashboardLayout::historyHeight : 318.f;
         maximumContentScroll = std::max(0.f, required - available);
         auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
