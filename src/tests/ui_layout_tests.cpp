@@ -6,6 +6,7 @@
 #include <limits>
 #ifdef _WIN32
 #include "../windows/ui_text.h"
+#include "../windows/dashboard_format.h"
 #include "../windows/dashboard_text_selection.h"
 #include <objbase.h>
 #endif
@@ -123,10 +124,13 @@ int main() try {
         }
         std::cout<<"Click/drag, exact text copy, clipping, repaint cache and centered bar labels: PASS\n";
     }
-    for (const float width : {640.f, 720.f, 759.f, 760.f, 819.f, 820.f, 1050.f, 1370.f, 1440.f, 1600.f}) {
+    if (compactDuration(std::chrono::seconds(0))!=L"0:00:00" ||
+        compactDuration(std::chrono::seconds(85*3600+34*60+34))!=L"85:34:34")
+        throw std::runtime_error("Compact format must retain cumulative hours and seconds");
+    for (const float width : {640.f, 720.f, 759.f, 760.f, 819.f, 820.f, 867.f, 868.f, 900.f, 1050.f, 1370.f, 1440.f, 1600.f}) {
         const auto layout = DashboardLayout{width, 520};
-        const int columns = DashboardLayout::metricColumns(layout.innerWidth());
-        const float card = (layout.innerWidth() - DashboardLayout::gap * (columns - 1)) / columns;
+        // History keeps full unit names and two columns; overview uses compact totals.
+        const float card = (layout.innerWidth() - DashboardLayout::gap) / 2;
         const auto checkAnnotation = [&](const std::wstring& text, TextStyle style, float w, float h) {
             ComPtr<IDWriteTextFormat> f;
             if (FAILED(createTextFormat(factory.Get(), style, &f))) throw std::runtime_error("Format creation failed");
@@ -167,6 +171,20 @@ int main() try {
         if (FAILED(createMetricLayout(factory.Get(),huge[0],card-24,expanded.valueHeight,&expandedText)))
             throw std::runtime_error("Expanded total cannot fit");
         checkAnnotation(hugeActivity[0],type::activity,card-24,expanded.activityHeight);
+        const std::wstring totals[]{L"7:11:15",L"31:37:17",L"80:07:46",L"85:34:34"};
+        const std::wstring inputs[]{L"Clavier/souris : 5:29:59",L"Clavier/souris : 8:54:31"};
+        MetricCardLayout responsive;
+        if (FAILED(measureResponsiveMetricCards(factory.Get(),totals,inputs,layout.innerWidth(),responsive)))
+            throw std::runtime_error("Responsive overview cannot fit ordinary totals");
+        if ((width==1050 && responsive.columns!=4) || (width==720 && responsive.columns!=2))
+            throw std::runtime_error("Expected responsive four/two column layout");
+        if (width==1050 && DashboardLayout::overviewHeight(layout.innerWidth(),responsive.height(),700,responsive.columns)>522.1f)
+            throw std::runtime_error("Ordinary overview should fit 1050x700 without vertical overflow");
+        const std::wstring maxTotal[]{compactDuration(std::chrono::seconds::max())};
+        const std::wstring maxInput[]{L"Clavier/souris : "+maxTotal[0]};
+        MetricCardLayout exceptional;
+        if (FAILED(measureResponsiveMetricCards(factory.Get(),maxTotal,maxInput,layout.innerWidth(),exceptional)))
+            throw std::runtime_error("Extreme totals require safe responsive fallback");
     }
 #endif
     std::cout << "Monotone layout 640..1600, selected contrast="

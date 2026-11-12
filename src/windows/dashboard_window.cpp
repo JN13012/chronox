@@ -2,6 +2,7 @@
 
 #include "resource.h"
 #include "dashboard_layout.h"
+#include "dashboard_format.h"
 #include "dashboard_messages.h"
 #include "dashboard_text_selection.h"
 #include "ui_text.h"
@@ -786,13 +787,11 @@ struct DashboardWindow::Impl {
             snapshot.activityMeasured==overviewSizingMeasured) return overviewSizing;
         std::array<std::wstring,4> values,activity;
         for (int i=0;i<4;++i) {
-            values[i]=formatDuration(durations[i]);
+            values[i]=ui::compactDuration(durations[i]);
             activity[i]=std::wstring(L"Clavier/souris : ")+
-                (snapshot.activityMeasured[i]?formatDuration(durations[i+4]):L"non mesur\u00e9e");
+                (snapshot.activityMeasured[i]?ui::compactDuration(durations[i+4]):L"non mesur\u00e9e");
         }
-        const int columns=ui::DashboardLayout::metricColumns(width);
-        const float cardWidth=(width-ui::DashboardLayout::gap*(columns-1))/columns;
-        checkHr(ui::measureMetricCards(writeFactory.Get(),values,activity,cardWidth-24,overviewSizing),
+        checkHr(ui::measureResponsiveMetricCards(writeFactory.Get(),values,activity,width,overviewSizing),
                 "Measure compact dashboard cards");
         overviewSizingWidth=width; overviewSizingDurations=durations;
         overviewSizingMeasured=snapshot.activityMeasured;
@@ -817,12 +816,14 @@ struct DashboardWindow::Impl {
         if (right <= left || bottom <= top) return;
         const float width = right - left;
         const float gap = ui::DashboardLayout::gap;
-        const int columns = ui::DashboardLayout::metricColumns(width);
-        const float cardWidth = (width - gap * (columns - 1)) / columns;
         const auto& sizing=overviewCardSizing(width);
-        const float metricsTop = top + ui::DashboardLayout::overviewStatusHeight;
+        const int columns = sizing.columns;
+        const float cardWidth = (width - gap * (columns - 1)) / columns;
+        drawText(L"TEMPS DE SESSION \u00b7 h:mm:ss",labelFormat.Get(),mutedBrush.Get(),
+                 D2D1::RectF(left,top,right,top+18));
+        const float metricsTop = top + ui::DashboardLayout::overviewIntroHeight;
         const std::array<std::wstring, 4> labels{L"Aujourd'hui", L"Cette semaine",
-            formatMonthYear(snapshot.capturedAt), formatYear(snapshot.capturedAt)};
+            L"Ce mois", L"Cette ann\u00e9e"};
         const std::array<std::chrono::seconds, 4> values{snapshot.todayDuration,
             snapshot.weekDuration, snapshot.monthDuration, snapshot.yearDuration};
         for (int i = 0; i < 4; ++i) {
@@ -832,22 +833,23 @@ struct DashboardWindow::Impl {
             drawIcon(3, x+12, y+7, 20, cyanBrush.Get());
             drawText(labels[i].c_str(), labelFormat.Get(), cyanBrush.Get(),
                      D2D1::RectF(x + 40, y + 8, x + cardWidth - 12, y + 25));
-            drawText(L"TEMPS DE SESSION", labelFormat.Get(), mutedBrush.Get(),
-                     D2D1::RectF(x + 12, y + 27, x + cardWidth - 12, y + 44));
-            drawMetric(formatDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
+            drawMetric(ui::compactDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
                 x + cardWidth - 12, y + sizing.valueTop + sizing.valueHeight));
             const std::wstring activityText = std::wstring(L"Clavier/souris : ") +
-                (snapshot.activityMeasured[i] ? formatDuration(snapshot.activityDurations[i]) : L"non mesur\u00e9e");
+                (snapshot.activityMeasured[i] ? ui::compactDuration(snapshot.activityDurations[i]) : L"non mesur\u00e9e");
             drawText(activityText.c_str(), activityFormat.Get(), cyanBrush.Get(),
                      D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
                                 y + sizing.activityTop() + sizing.activityHeight));
         }
-        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height()) + gap;
-        const float chartWidth = (width - gap) / 2;
-        const auto timeline = D2D1::RectF(left, chartsTop, left + chartWidth, chartsTop + 180);
-        const auto week = D2D1::RectF(left + chartWidth + gap, chartsTop, right, chartsTop + 180);
+        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap;
+        const float chartHeight=ui::DashboardLayout::chartHeight(clientSize().height);
+        const bool stacked=ui::DashboardLayout::stackedCharts(width);
+        const float chartWidth = stacked?width:(width-gap)/2;
+        const auto timeline = D2D1::RectF(left,chartsTop,left+chartWidth,chartsTop+(stacked?84:chartHeight));
+        const auto week = stacked?D2D1::RectF(left,timeline.bottom+gap,right,timeline.bottom+gap+chartHeight):
+            D2D1::RectF(left+chartWidth+gap,chartsTop,right,chartsTop+chartHeight);
         drawCard(timeline); drawCard(week); drawTimeline(timeline); drawWeekChart(week);
-        const auto sessions = D2D1::RectF(left, chartsTop + 180 + gap, right, bottom);
+        const auto sessions = D2D1::RectF(left,week.bottom+gap,right,bottom);
         drawCard(sessions); drawRecentSessions(sessions);
     }
 
@@ -857,7 +859,7 @@ struct DashboardWindow::Impl {
                              bounds.right - 10.0f, bounds.top + 25.0f));
         const float left = bounds.left + 13.0f;
         const float right = bounds.right - 13.0f;
-        const float trackTop = bounds.top + 80.0f;
+        const float trackTop = bounds.top + (bounds.bottom-bounds.top)*.48f;
         const float trackBottom = trackTop + 18.0f;
         const auto track =
             D2D1::RoundedRect(D2D1::RectF(left, trackTop, right, trackBottom),
@@ -926,7 +928,7 @@ struct DashboardWindow::Impl {
             L"Lun", L"Mar", L"Mer", L"Jeu", L"Ven", L"Sam", L"Dim"};
         const float chartLeft = bounds.left + 12.0f;
         const float chartRight = bounds.right - 12.0f;
-        const float chartTop = bounds.top + 60.0f;
+        const float chartTop = bounds.top + 52.0f;
         const float chartBottom = bounds.bottom - 23.0f;
         const float chartHeight = std::max(8.0f, chartBottom - chartTop);
         const float slotWidth = (chartRight - chartLeft) / 7.0f;
@@ -957,10 +959,10 @@ struct DashboardWindow::Impl {
             const auto totalMinutes = std::chrono::duration_cast<std::chrono::minutes>(snapshot.weekDays[index]).count();
             const std::wstring amount = std::to_wstring(totalMinutes / 60) + L"h" +
                 (totalMinutes % 60 < 10 ? L"0" : L"") + std::to_wstring(totalMinutes % 60);
-            drawText(amount.c_str(), compactNavFormat.Get(), textBrush.Get(),
+            drawText(amount.c_str(), amount.size()<=5?labelFormat.Get():compactNavFormat.Get(), textBrush.Get(),
                 D2D1::RectF(center-slotWidth/2, chartTop-18,
                             center+slotWidth/2, chartTop-2),DWRITE_TEXT_ALIGNMENT_CENTER);
-            drawText(labels[index], compactNavFormat.Get(), textBrush.Get(),
+            drawText(labels[index], labelFormat.Get(), textBrush.Get(),
                      D2D1::RectF(center - slotWidth / 2.0f, chartBottom + 3.0f,
                                  center + slotWidth / 2.0f, bounds.bottom - 2.0f),DWRITE_TEXT_ALIGNMENT_CENTER);
         }
@@ -1682,7 +1684,7 @@ struct DashboardWindow::Impl {
                                D2D1::Point2F(width, size.height),
                                borderBrush.Get(), 1.0f);
 
-        if (width >= 200.0f) {
+        if (width >= 192.0f) {
             drawIcon(4, 22, 28, 28, cyanBrush.Get());
             drawText(L"CHRONOX", navFormat.Get(), textBrush.Get(),
                      D2D1::RectF(60, 28, width - 12, 48));
@@ -1693,9 +1695,9 @@ struct DashboardWindow::Impl {
             drawIcon(4, 19, 27, 34, cyanBrush.Get());
         }
 
-        const float navLeft = width >= 200.0f ? 16.0f : 8.0f;
+        const float navLeft = width >= 192.0f ? 16.0f : 8.0f;
         const float navRight = width - navLeft;
-        const float navHeight = width >= 200.0f ? 48.0f : 58.0f;
+        const float navHeight = width >= 192.0f ? 48.0f : 58.0f;
         const float navGap = 8.0f;
         for (std::size_t index = 0; index < PageLabels.size(); ++index) {
             const float top = 96.0f + static_cast<float>(index) *
@@ -1717,22 +1719,22 @@ struct DashboardWindow::Impl {
             if (focusedPage == static_cast<int>(index)) {
                 renderTarget->DrawRoundedRectangle(item, cyanBrush.Get(), 1.2f);
             }
-            const float textLeft = width >= 200.0f
+            const float textLeft = width >= 192.0f
                                        ? navLeft + 46.0f
                                        : navLeft;
-            const float textRight = width >= 200.0f
+            const float textRight = width >= 192.0f
                                         ? navRight - 10.0f
                                         : navRight;
-            if (width >= 200) drawIcon(static_cast<int>(index), navLeft+13, top+13, 21,
+            if (width >= 192) drawIcon(static_cast<int>(index), navLeft+13, top+13, 21,
                                        active ? cyanBrush.Get() : textBrush.Get());
             const wchar_t* label =
-                width >= 200.0f ? PageLabels[index]
+                width >= 192.0f ? PageLabels[index]
                                             : compactPageLabel(index);
             drawText(label,
-                     width >= 200.0f ? navFormat.Get()
+                     width >= 192.0f ? navFormat.Get()
                                                  : compactNavFormat.Get(),
                      active ? textBrush.Get() : mutedBrush.Get(),
-                     D2D1::RectF(textLeft, top + (width >= 200 ? 13.f : 5.f), textRight,
+                     D2D1::RectF(textLeft, top + (width >= 192 ? 13.f : 5.f), textRight,
                                  top + navHeight - 5.0f));
         }
     }
@@ -1849,7 +1851,7 @@ struct DashboardWindow::Impl {
         renderTarget->FillRectangle(separator, borderBrush.Get());
         renderTarget->FillRectangle(D2D1::RectF(contentLeft,112,contentLeft+52,114),cyanBrush.Get());
 
-        const float panelTop = 142.0f;
+        const float panelTop = activePage==DashboardPage::Overview?126.0f:142.0f;
         const float panelBottom = size.height - 32.0f;
         if (panelBottom <= panelTop + 40.0f) {
             return;
@@ -1864,7 +1866,8 @@ struct DashboardWindow::Impl {
 
         const float available = std::max(1.f, panelBottom - panelTop - 20);
         const float required = activePage == DashboardPage::Overview
-            ? ui::DashboardLayout::overviewHeight(contentWidth - 28,overviewCardSizing(contentWidth-28).height())
+            ? ui::DashboardLayout::overviewHeight(contentWidth-28,overviewCardSizing(contentWidth-28).height(),
+                size.height,overviewCardSizing(contentWidth-28).columns)
             : activePage == DashboardPage::History ? ui::DashboardLayout::historyHeight : 318.f;
         maximumContentScroll = std::max(0.f, required - available);
         auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];

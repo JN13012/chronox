@@ -86,7 +86,7 @@ int main() try {
         DWORD afterHandles{}; GetProcessHandleCount(GetCurrentProcess(),&afterHandles);
         const auto afterGdi=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS), afterUser=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
         check(beforeHandles==afterHandles && beforeGdi==afterGdi && beforeUser==afterUser);
-        for (const auto size : {SIZE{1050,700},SIZE{720,520},SIZE{819,520},SIZE{820,520},SIZE{1440,1000}}) {
+        for (const auto size : {SIZE{1050,700},SIZE{720,520},SIZE{819,520},SIZE{820,520},SIZE{867,520},SIZE{868,520},SIZE{900,600},SIZE{1440,1000}}) {
             const int dpi=static_cast<int>(GetDpiForWindow(own));
             RECT outer{0,0,MulDiv(size.cx,dpi,96),MulDiv(size.cy,dpi,96)};
             check(ui::adjustClientRectForDpi(&outer,static_cast<DWORD>(GetWindowLongPtrW(own,GWL_STYLE)),FALSE,0,dpi));

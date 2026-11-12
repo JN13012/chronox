@@ -74,4 +74,17 @@ inline HRESULT measureMetricCards(IDWriteFactory* factory,
     result = measured;
     return S_OK;
 }
+inline HRESULT measureResponsiveMetricCards(IDWriteFactory* factory,
+        std::span<const std::wstring> values, std::span<const std::wstring> activity,
+        float available, MetricCardLayout& result) {
+    int columns=DashboardLayout::metricColumns(available);
+    auto measure=[&] {
+        return measureMetricCards(factory,values,activity,
+            (available-DashboardLayout::gap*(columns-1))/columns-24,result);
+    };
+    HRESULT hr=measure();
+    if (hr==E_BOUNDS && columns==4) { columns=2; hr=measure(); }
+    if (SUCCEEDED(hr)) result.columns=columns;
+    return hr;
+}
 } // namespace chronox::ui
