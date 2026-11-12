@@ -1,8 +1,10 @@
 // Own-process presentation fixture: no application data or registry access.
 #include "../windows/dashboard_window.h"
 #include <windows.h>
+#include "../windows/ui_window_geometry.h"
 #include <objbase.h>
 #include <iostream>
+#include <algorithm>
 #include <stdexcept>
 #include <string_view>
 using namespace chronox;
@@ -50,19 +52,57 @@ int main() try {
         check(changes==7);
         SendMessageW(own,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==enabled);
         SendMessageW(enabled,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==delay);
+        SendMessageW(delay,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==own);
+        SendMessageW(own,WM_KEYDOWN,VK_TAB,0); check(!IsWindowVisible(enabled));
+        clickPage(2);
+        // Keyboard state is thread-local; these messages target only our fixture.
+        BYTE savedKeys[256]{}; check(GetKeyboardState(savedKeys));
+        BYTE shiftKeys[256]{}; std::copy(std::begin(savedKeys),std::end(savedKeys),std::begin(shiftKeys));
+        shiftKeys[VK_SHIFT]=0x80; check(SetKeyboardState(shiftKeys));
+        SendMessageW(own,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==delay);
+        SendMessageW(delay,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==enabled);
+        SendMessageW(enabled,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==own);
+        SendMessageW(own,WM_KEYDOWN,VK_TAB,0); check(!IsWindowVisible(enabled));
+        check(SetKeyboardState(savedKeys));
+        clickPage(2);
+        SendMessageW(enabled,BM_CLICK,0,0); check(!IsWindowEnabled(delay));
+        SendMessageW(own,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==enabled);
+        SendMessageW(enabled,WM_KEYDOWN,VK_TAB,0); check(GetFocus()==own);
+        SendMessageW(own,WM_KEYDOWN,VK_TAB,0); check(!IsWindowVisible(enabled));
+        clickPage(2); SendMessageW(enabled,BM_CLICK,0,0);
         clickPage(0); check(!IsWindowVisible(enabled));
         for(auto state:{ActivityState::Active,ActivityState::Inactive,ActivityState::Locked,ActivityState::Sleeping,ActivityState::Uncertain}) {
             snapshot.activityState=state; window.refresh();
         }
+        snapshot.activityMeasured.fill(false); window.refresh();
+        snapshot.activityMeasured.fill(true); snapshot.activityDurations.fill(std::chrono::seconds(0)); window.refresh();
+        snapshot.timeUncertain=true; window.refresh(); snapshot.timeUncertain=false;
         clickPage(1); clickPage(2); check(GetDlgItem(own,3101)==enabled);
         DWORD beforeHandles{}; GetProcessHandleCount(GetCurrentProcess(),&beforeHandles);
         const auto beforeGdi=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS), beforeUser=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
-        for(int i=0;i<20;++i) { SendMessageW(own,WM_CLOSE,0,0); window.showOrActivate(); }
+        for(int i=0;i<100;++i) { SendMessageW(own,WM_CLOSE,0,0); window.showOrActivate(); }
         check(GetDlgItem(own,3102)==delay);
         DWORD afterHandles{}; GetProcessHandleCount(GetCurrentProcess(),&afterHandles);
         const auto afterGdi=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS), afterUser=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
         check(beforeHandles==afterHandles && beforeGdi==afterGdi && beforeUser==afterUser);
-        std::cout<<"Dashboard 20 hide/show cycles: handles="<<afterHandles<<", GDI="<<afterGdi<<", USER="<<afterUser<<", all stable\n";
+        for (const auto size : {SIZE{1050,700},SIZE{720,520},SIZE{819,520},SIZE{820,520}}) {
+            const int dpi=static_cast<int>(GetDpiForWindow(own));
+            RECT outer{0,0,MulDiv(size.cx,dpi,96),MulDiv(size.cy,dpi,96)};
+            check(ui::adjustClientRectForDpi(&outer,static_cast<DWORD>(GetWindowLongPtrW(own,GWL_STYLE)),FALSE,0,dpi));
+            SetWindowPos(own,nullptr,0,0,outer.right-outer.left,outer.bottom-outer.top,SWP_NOMOVE|SWP_NOZORDER);
+            RECT actual{}; check(GetClientRect(own,&actual));
+            check(actual.right==MulDiv(size.cx,dpi,96) && actual.bottom==MulDiv(size.cy,dpi,96));
+            for(int page=0;page<3;++page) {
+                clickPage(page);
+                SendMessageW(own,WM_VSCROLL,SB_BOTTOM,0);
+                SCROLLINFO info{sizeof(info),SIF_ALL}; check(GetScrollInfo(own,SB_VERT,&info));
+                check(info.nPos==std::max(0,info.nMax-static_cast<int>(info.nPage)+1));
+                SendMessageW(own,WM_VSCROLL,SB_TOP,0);
+                check(GetScrollInfo(own,SB_VERT,&info)); check(info.nPos==0);
+                if(error) std::rethrow_exception(error);
+            }
+        }
+        std::cout<<"Dashboard 100 hide/show cycles: handles="<<afterHandles<<", GDI="<<afterGdi<<", USER="<<afterUser<<", all stable\n";
         if(error) std::rethrow_exception(error);
     }
     CoUninitialize();

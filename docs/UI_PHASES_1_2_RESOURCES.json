@@ -1,0 +1,289 @@
+{
+  "client_date": "2026-11-12",
+  "baseline_commit": "5cde795",
+  "baseline_exe_sha256": "E6E98C5ADCC1EC7B36156A865BE2BF57E253C06573E7CD60941149FAE5C1737D",
+  "candidate_review_sha256": "BEE8E27095E26D517A408372CA43220057F91A93A0A80916F939ED0488FCD394",
+  "candidate_app_sha256": "AD5965FD1242196689839A018A0502C8A009EBA49506EC3E648B1D6B7E560357",
+  "field_order": [
+    "private_bytes",
+    "working_set_bytes",
+    "handles",
+    "GDI",
+    "USER"
+  ],
+  "method": "Presentation fixture; sequential 3s warmup and 20s idle per page, same input data; one sample per page and size. CPU percent of one core. No real DB or registry.",
+  "samples": [
+    {
+      "page": "overview",
+      "baseline": {
+        "page": 0,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0074,
+        "cpu_one_core_percent": 0.0780962,
+        "before": [
+          33034240,
+          48738304,
+          758,
+          14,
+          17
+        ],
+        "after": [
+          33099776,
+          48779264,
+          759,
+          14,
+          16
+        ]
+      },
+      "candidate": {
+        "page": 0,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0108,
+        "cpu_one_core_percent": 0.078083,
+        "before": [
+          28078080,
+          38903808,
+          757,
+          14,
+          17
+        ],
+        "after": [
+          28176384,
+          38969344,
+          758,
+          14,
+          16
+        ]
+      }
+    },
+    {
+      "page": "history",
+      "baseline": {
+        "page": 1,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0057,
+        "cpu_one_core_percent": 0.234308,
+        "before": [
+          28319744,
+          38776832,
+          755,
+          14,
+          17
+        ],
+        "after": [
+          28364800,
+          38813696,
+          756,
+          14,
+          16
+        ]
+      },
+      "candidate": {
+        "page": 1,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0062,
+        "cpu_one_core_percent": 0.156202,
+        "before": [
+          29851648,
+          40136704,
+          757,
+          14,
+          17
+        ],
+        "after": [
+          29888512,
+          40161280,
+          758,
+          14,
+          16
+        ]
+      }
+    },
+    {
+      "page": "settings",
+      "baseline": {
+        "page": 2,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0093,
+        "cpu_one_core_percent": 0.0780889,
+        "before": [
+          28696576,
+          38903808,
+          755,
+          14,
+          17
+        ],
+        "after": [
+          28770304,
+          38952960,
+          756,
+          14,
+          16
+        ]
+      },
+      "candidate": {
+        "page": 2,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0039,
+        "cpu_one_core_percent": 0.15622,
+        "before": [
+          29573120,
+          38948864,
+          757,
+          14,
+          17
+        ],
+        "after": [
+          29663232,
+          39010304,
+          758,
+          14,
+          16
+        ]
+      }
+    },
+    {
+      "page": "overview",
+      "baseline": {
+        "page": 0,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.008,
+        "cpu_one_core_percent": 0.234281,
+        "before": [
+          30457856,
+          41107456,
+          780,
+          14,
+          18
+        ],
+        "after": [
+          26107904,
+          41238528,
+          781,
+          14,
+          18
+        ]
+      },
+      "candidate": {
+        "page": 0,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0013,
+        "cpu_one_core_percent": 0.312479,
+        "before": [
+          31465472,
+          41529344,
+          782,
+          14,
+          18
+        ],
+        "after": [
+          26537984,
+          41562112,
+          783,
+          14,
+          18
+        ]
+      }
+    },
+    {
+      "page": "history",
+      "baseline": {
+        "page": 1,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0008,
+        "cpu_one_core_percent": 0.156244,
+        "before": [
+          28614656,
+          41611264,
+          780,
+          14,
+          18
+        ],
+        "after": [
+          26071040,
+          41701376,
+          781,
+          14,
+          18
+        ]
+      },
+      "candidate": {
+        "page": 1,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0066,
+        "cpu_one_core_percent": 0.0780991,
+        "before": [
+          28143616,
+          39112704,
+          757,
+          14,
+          17
+        ],
+        "after": [
+          26132480,
+          39194624,
+          758,
+          14,
+          16
+        ]
+      }
+    },
+    {
+      "page": "settings",
+      "baseline": {
+        "page": 2,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0056,
+        "cpu_one_core_percent": 0.156206,
+        "before": [
+          28729344,
+          39899136,
+          755,
+          14,
+          17
+        ],
+        "after": [
+          25948160,
+          39997440,
+          756,
+          14,
+          16
+        ]
+      },
+      "candidate": {
+        "page": 2,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0127,
+        "cpu_one_core_percent": 0.0780755,
+        "before": [
+          29605888,
+          39116800,
+          757,
+          14,
+          17
+        ],
+        "after": [
+          26030080,
+          39182336,
+          758,
+          14,
+          16
+        ]
+      }
+    }
+  ],
+  "max_cpu_delta_percentage_points": 0.07819800000000002,
+  "max_private_delta_mib": 1.453125
+}

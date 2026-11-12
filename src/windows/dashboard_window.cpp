@@ -2,9 +2,11 @@
 
 #include "resource.h"
 #include "dashboard_layout.h"
+#include "dashboard_messages.h"
 #include "ui_text.h"
 
 #include <windows.h>
+#include "ui_window_geometry.h"
 #include <windowsx.h>
 #include <commctrl.h>
 #include <d2d1.h>
@@ -29,9 +31,6 @@ namespace {
 using Microsoft::WRL::ComPtr;
 
 constexpr wchar_t DashboardClassName[] = L"ChronoxDashboardWindow";
-constexpr float SidebarExpandedWidth = ui::DashboardLayout::expandedSidebar;
-constexpr float SidebarCompactWidth = ui::DashboardLayout::compactSidebar;
-constexpr float CompactLayoutThreshold = ui::DashboardLayout::compactThreshold;
 constexpr float InitialClientWidth = ui::DashboardLayout::initialWidth;
 constexpr float InitialClientHeight = ui::DashboardLayout::initialHeight;
 constexpr UINT_PTR DashboardRefreshTimerId = 1;
@@ -309,6 +308,7 @@ struct DashboardWindow::Impl {
         }
         calendarWindow = nullptr;
         releaseRenderResources();
+        if (settingsFont) DeleteObject(settingsFont);
         if (windowClassRegistered) {
             UnregisterClassW(DashboardClassName, GetModuleHandleW(nullptr));
         }
@@ -322,7 +322,7 @@ struct DashboardWindow::Impl {
     HWND activityCheckbox{}, activityDelay{};
     ActivitySettings displayedSettings{};
     bool settingsDisplayed{};
-    float settingsLeft{-1}, settingsRight{-1};
+    float settingsLeft{-1}, settingsRight{-1}, settingsLastScroll{-1};
     UINT settingsDpi{};
     static constexpr int ActivityEnabledId=3101, ActivityDelayId=3102;
     static constexpr int delays[]{1,5,10,15,30};
@@ -355,6 +355,7 @@ struct DashboardWindow::Impl {
     ComPtr<ID2D1SolidColorBrush> panelBrush;
     ComPtr<ID2D1SolidColorBrush> panelHoverBrush;
     ComPtr<ID2D1SolidColorBrush> accentBrush;
+    ComPtr<ID2D1SolidColorBrush> selectionBrush;
     ComPtr<ID2D1SolidColorBrush> cyanBrush;
     ComPtr<ID2D1SolidColorBrush> textBrush;
     ComPtr<ID2D1SolidColorBrush> mutedBrush;
@@ -365,6 +366,13 @@ struct DashboardWindow::Impl {
     ComPtr<IDWriteTextFormat> bodyFormat;
     ComPtr<IDWriteTextFormat> navFormat;
     ComPtr<IDWriteTextFormat> compactNavFormat;
+    ComPtr<IDWriteTextFormat> labelFormat;
+    ComPtr<IDWriteTextFormat> activityFormat;
+    std::array<float, 3> contentScroll{};
+    float maximumContentScroll{};
+    bool settingsNavigationReturn{};
+    D2D1_RECT_F historyDetailsBounds{};
+    HFONT settingsFont{};
 
     void showOrActivate() {
         if (window == nullptr) {
@@ -452,9 +460,9 @@ struct DashboardWindow::Impl {
                               static_cast<int>(dpi), 96),
                        MulDiv(static_cast<int>(InitialClientHeight),
                               static_cast<int>(dpi), 96)};
-        if (!AdjustWindowRectExForDpi(&outerRect, WS_OVERLAPPEDWINDOW, FALSE, 0,
+        if (!ui::adjustClientRectForDpi(&outerRect, WS_OVERLAPPEDWINDOW | WS_VSCROLL, FALSE, 0,
                                       dpi)) {
-            throw windowsError("AdjustWindowRectExForDpi(dashboard)",
+            throw windowsError("ui::adjustClientRectForDpi(dashboard)",
                                GetLastError());
         }
         const int width = std::min(outerRect.right - outerRect.left,
@@ -473,7 +481,7 @@ struct DashboardWindow::Impl {
                           2;
         window = CreateWindowExW(
             0, DashboardClassName, L"Chronox - Tableau de bord",
-            WS_OVERLAPPEDWINDOW, x, y, width, height, nullptr, nullptr,
+            WS_OVERLAPPEDWINDOW | WS_VSCROLL, x, y, width, height, nullptr, nullptr,
             GetModuleHandleW(nullptr), this);
         if (window == nullptr) {
             throw windowsError("CreateWindowExW(dashboard)", GetLastError());
@@ -507,6 +515,8 @@ struct DashboardWindow::Impl {
         create(ui::type::body, bodyFormat);
         create(ui::type::nav, navFormat);
         create(ui::type::compact, compactNavFormat);
+        create(ui::type::label, labelFormat);
+        create(ui::type::activity, activityFormat);
     }
 
     void createRenderTarget() {
@@ -527,6 +537,8 @@ struct DashboardWindow::Impl {
     }
 
     void createBrushes() {
+        checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::selection), &selectionBrush),
+                "CreateSolidColorBrush(dashboard selection)");
         checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::background),
                                                      &backgroundBrush),
                 "CreateSolidColorBrush(dashboard background)");
@@ -563,6 +575,7 @@ struct DashboardWindow::Impl {
         panelBrush.Reset();
         panelHoverBrush.Reset();
         accentBrush.Reset();
+        selectionBrush.Reset();
         cyanBrush.Reset();
         textBrush.Reset();
         mutedBrush.Reset();
@@ -573,6 +586,8 @@ struct DashboardWindow::Impl {
         bodyFormat.Reset();
         navFormat.Reset();
         compactNavFormat.Reset();
+        labelFormat.Reset();
+        activityFormat.Reset();
         writeFactory.Reset();
         d2dFactory.Reset();
     }
@@ -594,6 +609,7 @@ struct DashboardWindow::Impl {
             panelBrush.Reset();
             panelHoverBrush.Reset();
             accentBrush.Reset();
+            selectionBrush.Reset();
             cyanBrush.Reset();
             textBrush.Reset();
             mutedBrush.Reset();
@@ -612,105 +628,79 @@ struct DashboardWindow::Impl {
     }
 
     void drawCard(D2D1_RECT_F bounds) {
-        const auto card = D2D1::RoundedRect(bounds, 10.0f, 10.0f);
+        const auto card = D2D1::RoundedRect(bounds, ui::space::cardRadius, ui::space::cardRadius);
         renderTarget->FillRoundedRectangle(card, panelHoverBrush.Get());
         renderTarget->DrawRoundedRectangle(card, borderBrush.Get(), 0.8f);
     }
 
+    void drawMetric(const std::wstring& value, D2D1_RECT_F bounds) {
+        ComPtr<IDWriteTextLayout> layout;
+        checkHr(ui::createMetricLayout(writeFactory.Get(), value,
+                    bounds.right - bounds.left, bounds.bottom - bounds.top, &layout),
+                "Measure dashboard duration without truncation");
+        renderTarget->DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top),
+                                    layout.Get(), textBrush.Get());
+    }
+
+    void drawMeasurementNotice(float left, float right, float top, bool measured, bool uncertain) {
+        const wchar_t* coverage = ui::coverageMessage(measured);
+        drawText(coverage, labelFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(left, top, right, top + 36));
+        if (uncertain) {
+            drawText(ui::uncertaintyMessage,
+                     labelFormat.Get(), cyanBrush.Get(), D2D1::RectF(left, top + 38, right, top + 74));
+        }
+    }
+
     void drawOverview(float left, float right, float top, float bottom) {
-        if (right <= left || bottom <= top) {
-            return;
-        }
-        const float width = right - left;
-        constexpr float gap = 9.0f;
-        const float statusY = top + 1.0f;
-        const auto statusColor =
-            snapshot.trackingActive ? cyanBrush.Get() : mutedBrush.Get();
-        renderTarget->FillEllipse(D2D1::Ellipse(
-                                     D2D1::Point2F(left + 6.0f, statusY + 8.0f),
-                                     4.0f, 4.0f),
-                                 statusColor);
-        const wchar_t* activityLabel=L"Inactif";
-        switch(snapshot.activityState) {
-        case ActivityState::Active: activityLabel=L"Actif"; break;
+        if (right <= left || bottom <= top) return;
+        const wchar_t* activityLabel = L"Inactif";
+        switch (snapshot.activityState) {
+        case ActivityState::Active: activityLabel = L"Actif"; break;
         case ActivityState::Inactive: break;
-        case ActivityState::Locked: activityLabel=L"Verrouill\u00e9"; break;
-        case ActivityState::Sleeping: activityLabel=L"Veille"; break;
-        case ActivityState::Uncertain: activityLabel=L"Mesure incertaine"; break;
+        case ActivityState::Locked: activityLabel = L"Verrouill\u00e9"; break;
+        case ActivityState::Sleeping: activityLabel = L"Veille"; break;
+        case ActivityState::Uncertain: activityLabel = L"Mesure incertaine"; break;
         }
-        std::wstring status=std::wstring(L"Activit\u00e9 : ")+activityLabel;
-        if(!snapshot.activityDetectionEnabled) status+=L"  /  D\u00e9tection d\u00e9sactiv\u00e9e";
-        if(snapshot.timeUncertain) status+=L"  /  Mesure incertaine (voir Historique)";
-        drawText(status.c_str(),
-                 compactNavFormat.Get(), statusColor,
-                 D2D1::RectF(left + 18.0f, statusY, right, statusY + 18.0f));
-
-        const std::wstring monthLabel = formatMonthYear(snapshot.capturedAt);
-        const std::wstring yearLabel = formatYear(snapshot.capturedAt);
-        constexpr std::array<const wchar_t*, 2> fixedMetricLabels{
-            L"Aujourd'hui", L"Cette semaine"};
-        const std::array<std::chrono::seconds, 4> metricValues{
-            snapshot.todayDuration, snapshot.weekDuration, snapshot.monthDuration,
-            snapshot.yearDuration};
-        const float metricsTop = top + 24.0f;
-        const float metricsHeight = 94.0f;
-        const float metricWidth = (width - gap * 3.0f) / 4.0f;
-        for (std::size_t index = 0; index < metricValues.size(); ++index) {
-            const float cardLeft =
-                left + static_cast<float>(index) * (metricWidth + gap);
-            drawCard(D2D1::RectF(cardLeft, metricsTop, cardLeft + metricWidth,
-                                 metricsTop + metricsHeight));
-            const std::wstring dynamicLabel =
-                index == 2 ? monthLabel : (index == 3 ? yearLabel : L"");
-            const wchar_t* metricLabel =
-                index < fixedMetricLabels.size()
-                    ? fixedMetricLabels[index]
-                    : dynamicLabel.c_str();
-            drawText(metricLabel, compactNavFormat.Get(),
-                     mutedBrush.Get(),
-                     D2D1::RectF(cardLeft + 10.0f, metricsTop + 8.0f,
-                                 cardLeft + metricWidth - 8.0f,
-                                 metricsTop + 25.0f));
-            const std::wstring value = L"Session " + formatDuration(metricValues[index]);
-            drawText(value.c_str(), compactNavFormat.Get(), textBrush.Get(),
-                     D2D1::RectF(cardLeft + 10.0f, metricsTop + 30.0f,
-                                 cardLeft + metricWidth - 7.0f,
-                                 metricsTop + 63.0f));
-            const auto activityText=std::wstring(L"Activit\u00e9 : ")+
-                (snapshot.activityMeasured[index]?formatDuration(snapshot.activityDurations[index]):L"non mesur\u00e9e");
-            drawText(activityText.c_str(),compactNavFormat.Get(),cyanBrush.Get(),
-                D2D1::RectF(cardLeft+10.0f,metricsTop+69.0f,cardLeft+metricWidth-7.0f,metricsTop+90.0f));
+        const auto status = ui::trackingStatus(snapshot.trackingActive, activityLabel, snapshot.activityDetectionEnabled);
+        drawText(status.c_str(), labelFormat.Get(), textBrush.Get(),
+                 D2D1::RectF(left, top, right, top + 36));
+        const bool measured = std::any_of(snapshot.activityMeasured.begin(), snapshot.activityMeasured.end(), [](bool v) { return v; });
+        drawMeasurementNotice(left, right, top + 38, measured, snapshot.timeUncertain);
+        const float width = right - left;
+        const float gap = ui::DashboardLayout::gap;
+        const int columns = ui::DashboardLayout::metricColumns(width);
+        const float cardWidth = (width - gap * (columns - 1)) / columns;
+        const float metricsTop = top + 112;
+        const std::array<std::wstring, 4> labels{L"Aujourd'hui", L"Cette semaine",
+            formatMonthYear(snapshot.capturedAt), formatYear(snapshot.capturedAt)};
+        const std::array<std::chrono::seconds, 4> values{snapshot.todayDuration,
+            snapshot.weekDuration, snapshot.monthDuration, snapshot.yearDuration};
+        for (int i = 0; i < 4; ++i) {
+            const float x = left + (i % columns) * (cardWidth + gap);
+            const float y = metricsTop + (i / columns) * (ui::DashboardLayout::metricHeight + gap);
+            drawCard(D2D1::RectF(x, y, x + cardWidth, y + ui::DashboardLayout::metricHeight));
+            drawText(labels[i].c_str(), labelFormat.Get(), cyanBrush.Get(),
+                     D2D1::RectF(x + 12, y + 8, x + cardWidth - 12, y + 25));
+            drawText(L"TEMPS DE SESSION", labelFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(x + 12, y + 28, x + cardWidth - 12, y + 45));
+            drawMetric(formatDuration(values[i]), D2D1::RectF(x + 12, y + 46, x + cardWidth - 12, y + 110));
+            const std::wstring activityText = std::wstring(L"Activit\u00e9 : ") +
+                (snapshot.activityMeasured[i] ? formatDuration(snapshot.activityDurations[i]) : L"non mesur\u00e9e");
+            drawText(activityText.c_str(), activityFormat.Get(), cyanBrush.Get(),
+                     D2D1::RectF(x + 12, y + 112, x + cardWidth - 12, y + 150));
         }
-
-        drawText(L"Activit\u00e9 : couverture partielle ; historique ant\u00e9rieur non mesur\u00e9.",compactNavFormat.Get(),mutedBrush.Get(),
-            D2D1::RectF(left,metricsTop+metricsHeight+2.0f,right,metricsTop+metricsHeight+21.0f));
-        const float chartsTop = metricsTop + metricsHeight + 24.0f;
-        constexpr float minimumSessionsHeight = 106.0f;
-        const float chartsHeight =
-            std::max(92.0f,
-                     std::min(154.0f,
-                              bottom - chartsTop - minimumSessionsHeight - 9.0f));
-        const float sessionsTop = chartsTop + chartsHeight + 9.0f;
-        const float chartWidth = (width - gap) / 2.0f;
-        const D2D1_RECT_F timelineCard =
-            D2D1::RectF(left, chartsTop, left + chartWidth,
-                        chartsTop + chartsHeight);
-        const D2D1_RECT_F weekCard =
-            D2D1::RectF(left + chartWidth + gap, chartsTop, right,
-                        chartsTop + chartsHeight);
-        drawCard(timelineCard);
-        drawCard(weekCard);
-        drawTimeline(timelineCard);
-        drawWeekChart(weekCard);
-
-        const D2D1_RECT_F sessionsCard =
-            D2D1::RectF(left, sessionsTop, right, bottom);
-        drawCard(sessionsCard);
-        drawRecentSessions(sessionsCard);
+        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width) + gap;
+        const float chartWidth = (width - gap) / 2;
+        const auto timeline = D2D1::RectF(left, chartsTop, left + chartWidth, chartsTop + 154);
+        const auto week = D2D1::RectF(left + chartWidth + gap, chartsTop, right, chartsTop + 154);
+        drawCard(timeline); drawCard(week); drawTimeline(timeline); drawWeekChart(week);
+        const auto sessions = D2D1::RectF(left, chartsTop + 154 + gap, right, bottom);
+        drawCard(sessions); drawRecentSessions(sessions);
     }
 
     void drawTimeline(D2D1_RECT_F bounds) {
-        drawText(L"FRISE DU JOUR", compactNavFormat.Get(), cyanBrush.Get(),
+        drawText(L"SESSION : FRISE DU JOUR", compactNavFormat.Get(), cyanBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 10.0f, bounds.top + 25.0f));
         const float left = bounds.left + 13.0f;
@@ -779,7 +769,7 @@ struct DashboardWindow::Impl {
     }
 
     void drawWeekChart(D2D1_RECT_F bounds) {
-        drawText(L"HEURES \u00b7 LUNDI AU DIMANCHE", compactNavFormat.Get(),
+        drawText(L"SESSION : HEURES / LUNDI AU DIMANCHE", compactNavFormat.Get(),
                  cyanBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 8.0f, bounds.top + 25.0f));
@@ -1005,8 +995,8 @@ struct DashboardWindow::Impl {
             throw windowsError("MonthCal_SetCurSel(history)", GetLastError());
         }
         POINT position{
-            static_cast<LONG>(calendarButtonBounds.left),
-            static_cast<LONG>(calendarButtonBounds.bottom)};
+            MulDiv(static_cast<int>(calendarButtonBounds.left), static_cast<int>(dpi), 96),
+            MulDiv(static_cast<int>(calendarButtonBounds.bottom - contentScroll[1]), static_cast<int>(dpi), 96)};
         if (!ClientToScreen(window, &position)) {
             throw windowsError("ClientToScreen(history calendar)", GetLastError());
         }
@@ -1052,7 +1042,7 @@ struct DashboardWindow::Impl {
 
     void drawHistoryNavigation(D2D1_RECT_F bounds) {
         const float width = bounds.right - bounds.left;
-        const float tabWidth = width * 0.43f / 4.0f;
+        const float tabWidth = (width - 6.0f) / 4.0f;
         const float tabGap = 2.0f;
         constexpr std::array<const wchar_t*, 4> labels{
             L"Jour", L"Semaine", L"Mois", L"Ann\u00e9e"};
@@ -1062,10 +1052,10 @@ struct DashboardWindow::Impl {
         float x = bounds.left;
         for (std::size_t index = 0; index < periods.size(); ++index) {
             const D2D1_RECT_F tab =
-                D2D1::RectF(x, bounds.top, x + tabWidth, bounds.bottom);
+                D2D1::RectF(x, bounds.top, x + tabWidth, bounds.top + 30);
             renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(tab, 5.0f, 5.0f),
-                historyPeriod == periods[index] ? accentBrush.Get()
+                historyPeriod == periods[index] ? selectionBrush.Get()
                                                 : panelHoverBrush.Get());
             drawText(labels[index], compactNavFormat.Get(),
                      historyPeriod == periods[index] ? textBrush.Get()
@@ -1076,6 +1066,8 @@ struct DashboardWindow::Impl {
             x += tabWidth + tabGap;
         }
 
+        x = bounds.left;
+        bounds.top += 40;
         const float navGap = 5.0f;
         const float buttonWidth = 28.0f;
         const D2D1_RECT_F previous =
@@ -1098,7 +1090,7 @@ struct DashboardWindow::Impl {
         addHistoryHit(next, 2);
         x += buttonWidth + navGap;
 
-        const float todayWidth = std::min(62.0f, width * 0.15f);
+        const float todayWidth = 82.0f;
         const float calendarWidth = 34.0f;
         const float dateTextRight = bounds.right - todayWidth - navGap -
                                     calendarWidth - navGap;
@@ -1134,38 +1126,29 @@ struct DashboardWindow::Impl {
     }
 
     void drawHistorySummary(D2D1_RECT_F bounds) {
-        const std::array<std::wstring, 4> values{
-            formatDuration(activeHistory->duration),
-            activeHistory->activityMeasured?formatDuration(activeHistory->activityDuration):L"Non mesur\u00e9e",
-            std::to_wstring(activeHistory->sessions.size()),
-            activeHistory->daysWithActivity == 0
-                ? L"\u2014"
-                : formatDuration(std::chrono::seconds(
-                      activeHistory->duration.count() /
-                      static_cast<std::int64_t>(activeHistory->daysWithActivity)))};
-        constexpr std::array<const wchar_t*, 4> labels{
-            L"TEMPS DE SESSION", L"TEMPS D'ACTIVIT\u00c9", L"SESSIONS",
-            L"SESSION / JOUR MESUR\u00c9"};
-        const float gap = 6.0f;
-        const float cardWidth =
-            (bounds.right - bounds.left - gap * 3.0f) / 4.0f;
-        for (std::size_t index = 0; index < values.size(); ++index) {
-            const float left =
-                bounds.left + static_cast<float>(index) * (cardWidth + gap);
-            const D2D1_RECT_F card =
-                D2D1::RectF(left, bounds.top, left + cardWidth, bounds.bottom);
-            drawCard(card);
-            drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
-                     D2D1::RectF(card.left + 7.0f, card.top + 5.0f,
-                                 card.right - 5.0f, card.top + 19.0f));
-            drawText(values[index].c_str(), compactNavFormat.Get(), textBrush.Get(),
-                     D2D1::RectF(card.left + 7.0f, card.top + 22.0f,
-                                 card.right - 5.0f, card.bottom - 3.0f));
+        const float gap = ui::space::md;
+        const float cardWidth = (bounds.right - bounds.left - gap) / 2;
+        const std::array<std::wstring, 2> values{formatDuration(activeHistory->duration),
+            activeHistory->activityMeasured ? formatDuration(activeHistory->activityDuration) : L"Non mesur\u00e9e"};
+        const std::array<const wchar_t*, 2> labels{L"TEMPS DE SESSION", L"TEMPS D'ACTIVIT\u00c9"};
+        for (int i = 0; i < 2; ++i) {
+            const float x = bounds.left + i * (cardWidth + gap);
+            drawCard(D2D1::RectF(x, bounds.top, x + cardWidth, bounds.top + 112));
+            drawText(labels[i], labelFormat.Get(), i == 0 ? mutedBrush.Get() : cyanBrush.Get(),
+                     D2D1::RectF(x + 12, bounds.top + 12, x + cardWidth - 12, bounds.top + 32));
+            drawMetric(values[i], D2D1::RectF(x + 12, bounds.top + 40, x + cardWidth - 12, bounds.top + 104));
         }
+        const auto average = activeHistory->daysWithActivity == 0 ? L"\u2014" :
+            formatDuration(std::chrono::seconds(activeHistory->duration.count() /
+                static_cast<std::int64_t>(activeHistory->daysWithActivity)));
+        const std::wstring secondary = std::to_wstring(activeHistory->sessions.size()) +
+            L" session(s)  /  Session par jour mesur\u00e9 : " + average;
+        drawText(secondary.c_str(), activityFormat.Get(), mutedBrush.Get(),
+                 D2D1::RectF(bounds.left, bounds.top + 124, bounds.right, bounds.bottom));
     }
 
     void drawHistoryDayTimeline(D2D1_RECT_F bounds) {
-        drawText(L"FRISE DES HEURES", compactNavFormat.Get(), cyanBrush.Get(),
+        drawText(L"SESSION : FRISE DES HEURES", compactNavFormat.Get(), cyanBrush.Get(),
                  D2D1::RectF(bounds.left + 8.0f, bounds.top + 4.0f,
                              bounds.right - 8.0f, bounds.top + 21.0f));
         const float left = bounds.left + 12.0f;
@@ -1224,10 +1207,10 @@ struct DashboardWindow::Impl {
     }
 
     void drawHistoryBuckets(D2D1_RECT_F bounds, bool monthCalendar) {
-        drawText(monthCalendar ? L"CALENDRIER DU MOIS"
+        drawText(monthCalendar ? L"SESSION : CALENDRIER DU MOIS"
                                : (historyPeriod == CalendarPeriod::Year
-                                      ? L"HEURES PAR MOIS"
-                                      : L"HEURES PAR JOUR"),
+                                      ? L"SESSION : HEURES PAR MOIS"
+                                      : L"SESSION : HEURES PAR JOUR"),
                  compactNavFormat.Get(), cyanBrush.Get(),
                  D2D1::RectF(bounds.left + 8.0f, bounds.top + 4.0f,
                              bounds.right - 8.0f, bounds.top + 20.0f));
@@ -1501,40 +1484,18 @@ struct DashboardWindow::Impl {
     }
 
     void drawHistory(float left, float right, float top, float bottom) {
-        if (right <= left || bottom <= top) {
-            return;
-        }
-        if (activeHistory == nullptr) {
-            loadHistory(false);
-        }
+        if (right <= left || bottom <= top) return;
+        if (activeHistory == nullptr) loadHistory(false);
         historyHitCount = 0;
-        const float height = bottom - top;
-        const float navHeight = 30.0f;
-        const float summaryHeight = height < 370.0f ? 48.0f : 58.0f;
-        const float detailsHeight = std::min(150.0f, std::max(78.0f, height * 0.34f));
-        const float gap = 7.0f;
-        const float summaryTop = top + navHeight + gap;
-        const float chartTop = summaryTop + summaryHeight + gap;
-        const float detailTop = std::max(chartTop + 55.0f,
-                                         bottom - detailsHeight);
-        const D2D1_RECT_F nav =
-            D2D1::RectF(left, top, right, top + navHeight);
-        const D2D1_RECT_F summary =
-            D2D1::RectF(left, summaryTop, right, summaryTop + summaryHeight);
-        const D2D1_RECT_F chart =
-            D2D1::RectF(left, chartTop, right, detailTop - gap);
-        const D2D1_RECT_F details =
-            D2D1::RectF(left, detailTop, right, bottom);
-        drawHistoryNavigation(nav);
-        drawHistorySummary(summary);
-        drawCard(chart);
-        drawCard(details);
-        if (historyPeriod == CalendarPeriod::Day) {
-            drawHistoryDayTimeline(chart);
-        } else {
-            drawHistoryBuckets(chart, historyPeriod == CalendarPeriod::Month);
-        }
-        drawHistorySessions(details);
+        drawMeasurementNotice(left, right, top, activeHistory->activityMeasured, activeHistory->timeUncertain);
+        drawHistoryNavigation(D2D1::RectF(left, top + 84, right, top + 156));
+        drawHistorySummary(D2D1::RectF(left, top + 168, right, top + 344));
+        const auto chart = D2D1::RectF(left, top + 356, right, top + 592);
+        historyDetailsBounds = D2D1::RectF(left, top + 604, right, bottom);
+        drawCard(chart); drawCard(historyDetailsBounds);
+        if (historyPeriod == CalendarPeriod::Day) drawHistoryDayTimeline(chart);
+        else drawHistoryBuckets(chart, historyPeriod == CalendarPeriod::Month);
+        drawHistorySessions(historyDetailsBounds);
     }
 
     D2D1_SIZE_F clientSize() const {
@@ -1554,7 +1515,7 @@ struct DashboardWindow::Impl {
                                D2D1::Point2F(width, size.height),
                                borderBrush.Get(), 1.0f);
 
-        if (width > SidebarCompactWidth) {
+        if (width >= 200.0f) {
             drawText(L"CHRONOX", brandFormat.Get(), cyanBrush.Get(),
                      D2D1::RectF(28.0f, 28.0f, width - 20.0f, 48.0f));
             drawText(L"SESSION TRACKER", compactNavFormat.Get(),
@@ -1569,9 +1530,9 @@ struct DashboardWindow::Impl {
                      D2D1::RectF(17.0f, 23.0f, 55.0f, 62.0f));
         }
 
-        const float navLeft = width > SidebarCompactWidth ? 16.0f : 8.0f;
+        const float navLeft = width >= 200.0f ? 16.0f : 8.0f;
         const float navRight = width - navLeft;
-        const float navHeight = width > SidebarCompactWidth ? 48.0f : 58.0f;
+        const float navHeight = width >= 200.0f ? 48.0f : 58.0f;
         const float navGap = 8.0f;
         for (std::size_t index = 0; index < PageLabels.size(); ++index) {
             const float top = 96.0f + static_cast<float>(index) *
@@ -1593,17 +1554,17 @@ struct DashboardWindow::Impl {
             if (focusedPage == static_cast<int>(index)) {
                 renderTarget->DrawRoundedRectangle(item, cyanBrush.Get(), 1.2f);
             }
-            const float textLeft = width > SidebarCompactWidth
+            const float textLeft = width >= 200.0f
                                        ? navLeft + 18.0f
                                        : navLeft;
-            const float textRight = width > SidebarCompactWidth
+            const float textRight = width >= 200.0f
                                         ? navRight - 10.0f
                                         : navRight;
             const wchar_t* label =
-                width > SidebarCompactWidth ? PageLabels[index]
+                width >= 200.0f ? PageLabels[index]
                                             : compactPageLabel(index);
             drawText(label,
-                     width > SidebarCompactWidth ? navFormat.Get()
+                     width >= 200.0f ? navFormat.Get()
                                                  : compactNavFormat.Get(),
                      active ? textBrush.Get() : mutedBrush.Get(),
                      D2D1::RectF(textLeft, top + 5.0f, textRight,
@@ -1629,7 +1590,6 @@ struct DashboardWindow::Impl {
             if(!activityCheckbox || !activityDelay) throw windowsError("CreateWindowExW(activity settings)",GetLastError());
             for(int delay:delays) { const auto label=std::to_wstring(delay)+L" min"; SendMessageW(activityDelay,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str())); }
             for(HWND control:{activityCheckbox,activityDelay}) {
-                SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
                 SetWindowSubclass(control,settingsControlProcedure,1,reinterpret_cast<DWORD_PTR>(this));
             }
         }
@@ -1641,27 +1601,62 @@ struct DashboardWindow::Impl {
                 for(int i=0;i<5;++i) if(delays[i]==settings.minutes) SendMessageW(activityDelay,CB_SETCURSEL,i,0);
                 EnableWindow(activityDelay,settings.enabled); displayedSettings=settings; settingsDisplayed=true;
             }
+            if (!settingsFont || settingsDpi != dpi) {
+                LOGFONTW font{};
+                font.lfHeight = -MulDiv(static_cast<int>(ui::type::body.size), static_cast<int>(dpi), 96);
+                wcscpy_s(font.lfFaceName, ui::type::family);
+                HFONT replacement = CreateFontIndirectW(&font);
+                if (!replacement) throw windowsError("CreateFont(settings)", GetLastError());
+                for (HWND control : {activityCheckbox, activityDelay})
+                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
+                if (settingsFont) DeleteObject(settingsFont);
+                settingsFont = replacement;
+            }
             const auto px=[&](float x){ return MulDiv(static_cast<int>(x),static_cast<int>(dpi),96); };
-            if(left!=settingsLeft || right!=settingsRight || dpi!=settingsDpi) {
-                MoveWindow(activityCheckbox,px(left),px(202),px(right-left),px(32),TRUE);
-                MoveWindow(activityDelay,px(left),px(270),px(150),px(210),TRUE);
-                settingsLeft=left; settingsRight=right; settingsDpi=dpi;
+            const float scroll = contentScroll[2];
+            if (left != settingsLeft || right != settingsRight || dpi != settingsDpi || scroll != settingsLastScroll) {
+                MoveWindow(activityCheckbox,px(left),px(202-scroll),px(right-left),px(32),TRUE);
+                MoveWindow(activityDelay,px(left),px(270-scroll),px(150),px(210),TRUE);
+                settingsLeft=left; settingsRight=right; settingsDpi=dpi; settingsLastScroll=scroll;
             }
         }
-        ShowWindow(activityCheckbox,visible?SW_SHOW:SW_HIDE);
-        ShowWindow(activityDelay,visible?SW_SHOW:SW_HIDE);
+        const float scroll = contentScroll[2];
+        const float bottom = clientSize().height - 32;
+        ShowWindow(activityCheckbox,visible && 202-scroll>=142 && 234-scroll<=bottom ? SW_SHOW : SW_HIDE);
+        ShowWindow(activityDelay,visible && 270-scroll>=142 && 300-scroll<=bottom ? SW_SHOW : SW_HIDE);
     }
+
+    void focusSettingsControl(HWND control) {
+        contentScroll[2] = 0;
+        settingsNavigationReturn = false;
+        render();
+        SetFocus(control);
+    }
+
     static LRESULT CALLBACK settingsControlProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR data) {
         auto* self=reinterpret_cast<Impl*>(data);
-        if(msg==WM_KEYDOWN && w==VK_TAB) {
-            const bool backwards=(GetKeyState(VK_SHIFT)&0x8000)!=0;
-            if(hwnd==self->activityCheckbox && !backwards && IsWindowEnabled(self->activityDelay)) SetFocus(self->activityDelay);
-            else if(hwnd==self->activityDelay && backwards) SetFocus(self->activityCheckbox);
-            else SetFocus(self->window);
+        if (msg == WM_KEYDOWN && w == VK_TAB) {
+            const bool backwards = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            const auto from = hwnd == self->activityCheckbox ? ui::SettingsFocus::Enabled : ui::SettingsFocus::Delay;
+            const auto next = ui::nextSettingsFocus(from, backwards, IsWindowEnabled(self->activityDelay) != FALSE);
+            if (next == ui::SettingsFocus::Enabled) self->focusSettingsControl(self->activityCheckbox);
+            else if (next == ui::SettingsFocus::Delay) self->focusSettingsControl(self->activityDelay);
+            else {
+                self->settingsNavigationReturn = true;
+                self->focusedPage = static_cast<int>(DashboardPage::Settings);
+                SetFocus(self->window);
+                self->render();
+            }
             return 0;
         }
         if(msg==WM_NCDESTROY) RemoveWindowSubclass(hwnd,settingsControlProcedure,1);
         return DefSubclassProc(hwnd,msg,w,l);
+    }
+
+    void scrollContent(float delta) {
+        auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
+        scroll = std::clamp(scroll + delta, 0.f, maximumContentScroll);
+        render();
     }
 
     void drawContent() {
@@ -1671,7 +1666,6 @@ struct DashboardWindow::Impl {
         const float contentLeft = left + padding;
         const float contentRight = size.width - padding;
         const float contentWidth = std::max(0.0f, contentRight - contentLeft);
-        layoutActivityControls(activePage==DashboardPage::Settings,contentLeft+24.0f,contentRight-24.0f);
         if (contentWidth < 24.0f || size.height < 210.0f) {
             return;
         }
@@ -1698,14 +1692,36 @@ struct DashboardWindow::Impl {
         renderTarget->FillRoundedRectangle(panel, panelBrush.Get());
         renderTarget->DrawRoundedRectangle(panel, borderBrush.Get(), 1.0f);
 
+        const float available = std::max(1.f, panelBottom - panelTop - 20);
+        const float required = activePage == DashboardPage::Overview
+            ? ui::DashboardLayout::overviewHeight(contentWidth - 28)
+            : activePage == DashboardPage::History ? ui::DashboardLayout::historyHeight : 318.f;
+        maximumContentScroll = std::max(0.f, required - available);
+        auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
+        scroll = std::clamp(scroll, 0.f, maximumContentScroll);
+        SCROLLINFO info{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL};
+        info.nMin = 0; info.nMax = static_cast<int>(required) - 1;
+        info.nPage = static_cast<UINT>(available); info.nPos = static_cast<int>(scroll);
+        SCROLLINFO previous{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS};
+        GetScrollInfo(window, SB_VERT, &previous);
+        if (previous.nMax != info.nMax || previous.nPage != info.nPage || previous.nPos != info.nPos)
+            SetScrollInfo(window, SB_VERT, &info, TRUE);
+        layoutActivityControls(activePage==DashboardPage::Settings,contentLeft+24,contentRight-24);
+        struct ContentScope {
+            ID2D1RenderTarget* target;
+            ~ContentScope() { target->SetTransform(D2D1::Matrix3x2F::Identity()); target->PopAxisAlignedClip(); }
+        } scope{renderTarget.Get()};
+        renderTarget->PushAxisAlignedClip(D2D1::RectF(contentLeft+1,panelTop+1,contentRight-1,panelBottom-1), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(0, -scroll));
+
         if (activePage == DashboardPage::Overview) {
             drawOverview(contentLeft + 14.0f, contentRight - 14.0f,
-                         panelTop + 10.0f, panelBottom - 10.0f);
+                         panelTop + 10.0f, panelTop + 10.0f + required);
             return;
         }
         if (activePage == DashboardPage::History) {
             drawHistory(contentLeft + 14.0f, contentRight - 14.0f,
-                        panelTop + 10.0f, panelBottom - 10.0f);
+                        panelTop + 10.0f, panelTop + 10.0f + required);
             return;
         }
 
@@ -1735,6 +1751,8 @@ struct DashboardWindow::Impl {
         if (index < 0 || index >= static_cast<int>(PageLabels.size())) {
             return;
         }
+        settingsNavigationReturn = false;
+        contentScroll[2] = 0;
         focusedPage = index;
         activePage = static_cast<DashboardPage>(index);
         SetFocus(window);
@@ -1765,6 +1783,8 @@ struct DashboardWindow::Impl {
                 (focusedPage + delta + static_cast<int>(PageLabels.size())) %
                 static_cast<int>(PageLabels.size());
         }
+        settingsNavigationReturn = false;
+        contentScroll[2] = 0;
         activePage = static_cast<DashboardPage>(focusedPage);
         if (activePage == DashboardPage::History) {
             loadHistory(false);
@@ -1793,6 +1813,7 @@ struct DashboardWindow::Impl {
             panelBrush.Reset();
             panelHoverBrush.Reset();
             accentBrush.Reset();
+            selectionBrush.Reset();
             cyanBrush.Reset();
             textBrush.Reset();
             mutedBrush.Reset();
@@ -1853,9 +1874,9 @@ struct DashboardWindow::Impl {
             }
             RECT minimum{0, 0, MulDiv(640, static_cast<int>(dpi), 96),
                          MulDiv(420, static_cast<int>(dpi), 96)};
-            if (!AdjustWindowRectExForDpi(&minimum, WS_OVERLAPPEDWINDOW, FALSE, 0,
+            if (!ui::adjustClientRectForDpi(&minimum, WS_OVERLAPPEDWINDOW | WS_VSCROLL, FALSE, 0,
                                           dpi)) {
-                throw windowsError("AdjustWindowRectExForDpi(dashboard minimum)",
+                throw windowsError("ui::adjustClientRectForDpi(dashboard minimum)",
                                    GetLastError());
             }
             limits->ptMinTrackSize.x = std::min(
@@ -1948,14 +1969,39 @@ struct DashboardWindow::Impl {
                 selectPage(selected);
             } else if (activePage == DashboardPage::History) {
                 int value = 0;
-                const int action = hitTestHistory(x, y, value);
+                const int action = y >= 142 && y < clientSize().height-32
+                    ? hitTestHistory(x, y + static_cast<int>(contentScroll[1]), value) : -1;
                 if (action >= 0) {
                     applyHistoryAction(action, value);
                 }
             }
             return 0;
         }
-        case WM_MOUSEWHEEL:
+        case WM_VSCROLL: {
+            const int action = LOWORD(wParam);
+            if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) {
+                SCROLLINFO info{sizeof(SCROLLINFO), SIF_TRACKPOS};
+                GetScrollInfo(hwnd, SB_VERT, &info);
+                contentScroll[static_cast<std::size_t>(activePage)] = static_cast<float>(info.nTrackPos);
+                render();
+            } else if (action == SB_TOP) scrollContent(-maximumContentScroll);
+            else if (action == SB_BOTTOM) scrollContent(maximumContentScroll);
+            else if (action == SB_LINEUP) scrollContent(-32);
+            else if (action == SB_LINEDOWN) scrollContent(32);
+            else if (action == SB_PAGEUP) scrollContent(-240);
+            else if (action == SB_PAGEDOWN) scrollContent(240);
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            ScreenToClient(hwnd, &point);
+            const float y = point.y * 96.f / dpi;
+            const bool overHistoryRows = activePage == DashboardPage::History &&
+                y >= historyDetailsBounds.top-contentScroll[1] && y < clientSize().height-32;
+            if (!overHistoryRows) {
+                scrollContent(-GET_WHEEL_DELTA_WPARAM(wParam) / static_cast<float>(WHEEL_DELTA) * 64);
+                return 0;
+            }
             if (activePage == DashboardPage::History &&
                 activeHistory != nullptr && !activeHistory->sessions.empty()) {
                 const int rows =
@@ -1973,8 +2019,24 @@ struct DashboardWindow::Impl {
                 render();
             }
             return 0;
+        }
         case WM_KEYDOWN:
-            if(activePage==DashboardPage::Settings && wParam==VK_TAB && activityCheckbox) { SetFocus(activityCheckbox); return 0; }
+            if (activePage == DashboardPage::Settings && wParam == VK_TAB && activityCheckbox) {
+                const bool backwards = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                if (settingsNavigationReturn) {
+                    settingsNavigationReturn = false;
+                    changeFocusedPage(backwards ? -1 : 1);
+                } else {
+                    const auto next = ui::nextSettingsFocus(ui::SettingsFocus::Navigation, backwards,
+                                                           IsWindowEnabled(activityDelay) != FALSE);
+                    focusSettingsControl(next == ui::SettingsFocus::Delay ? activityDelay : activityCheckbox);
+                }
+                return 0;
+            }
+            if (wParam == VK_PRIOR || wParam == VK_NEXT) {
+                scrollContent(wParam == VK_PRIOR ? -240.f : 240.f);
+                return 0;
+            }
             if (activePage == DashboardPage::History &&
                 !IsWindowVisible(calendarWindow)) {
                 switch (wParam) {

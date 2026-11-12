@@ -1,7 +1,8 @@
 // Presentation-only manual review / resource fixture. No database or registry access.
-// Arguments: page(0..2) clientWidth clientHeight seconds(0=manual) output.json
+// Arguments: page(0..2) clientWidth clientHeight seconds(0=manual) output.json state
 #include "../windows/dashboard_window.h"
 #include <windows.h>
+#include "../windows/ui_window_geometry.h"
 #include <psapi.h>
 #include <objbase.h>
 #include <algorithm>
@@ -21,6 +22,7 @@ int main(int argc, char** argv) try {
     const int seconds = argc > 4 ? std::stoi(argv[4]) : 0;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
+    struct ComLifetime { ~ComLifetime() { CoUninitialize(); } } comLifetime;
     std::exception_ptr error;
     ActivitySettings settings;
     DashboardSnapshot snapshot;
@@ -34,6 +36,11 @@ int main(int argc, char** argv) try {
     snapshot.activityMeasured.fill(true);
     snapshot.activityState = ActivityState::Inactive;
     snapshot.trackingActive = true;
+    const std::string_view state = argc > 6 ? argv[6] : "standard";
+    if (state == "missing") snapshot.activityMeasured.fill(false);
+    if (state == "zero") snapshot.activityDurations.fill(0s);
+    if (state == "uncertain") { snapshot.timeUncertain = true; snapshot.activityState = ActivityState::Uncertain; }
+    if (state == "disabled") { settings.enabled = false; snapshot.activityDetectionEnabled = false; }
     snapshot.todayIntervals = {{snapshot.todayRange.start + 8 * 3'600'000'000LL,
                                 snapshot.todayRange.start + 10 * 3'600'000'000LL}};
     snapshot.weekDays = {5h, 4h, 6h, 3h, 7h, 0h, 2h};
@@ -45,7 +52,8 @@ int main(int argc, char** argv) try {
             h.period = p; h.anchor = t; h.range = calendarPeriodContaining(t, p);
             h.capturedAt = snapshot.capturedAt;
             h.duration = 1234h + 59min + 59s;
-            h.activityDuration = 500h + 12min; h.activityMeasured = true;
+            h.activityDuration = state == "zero" ? 0s : 500h + 12min;
+            h.activityMeasured = state != "missing"; h.timeUncertain = state == "uncertain";
             h.daysWithActivity = 12; h.sessions = snapshot.recentSessions;
             Timestamp day = h.range.start;
             while (day < h.range.end) {
@@ -67,10 +75,15 @@ int main(int argc, char** argv) try {
     if (!own) throw std::runtime_error("No fixture window");
     const auto dpi = GetDpiForWindow(own);
     RECT rect{0, 0, MulDiv(width, dpi, 96), MulDiv(height, dpi, 96)};
-    AdjustWindowRectExForDpi(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+    ui::adjustClientRectForDpi(&rect, static_cast<DWORD>(GetWindowLongPtrW(own, GWL_STYLE)), FALSE, 0, dpi);
     SetWindowPos(own, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
                  SWP_NOMOVE | SWP_NOZORDER);
-    SetWindowTextW(own, L"Chronox — revue isolee (aucune base utilisateur)");
+    RECT client{}; GetClientRect(own, &client);
+    if (client.right != MulDiv(width, dpi, 96) || client.bottom != MulDiv(height, dpi, 96))
+        throw std::runtime_error("Review client size does not match requested DIPs");
+    const auto caption = L"Chronox - revue isolee / client " + std::to_wstring(client.right) +
+        L" x " + std::to_wstring(client.bottom) + L" px / DPI " + std::to_wstring(dpi);
+    SetWindowTextW(own, caption.c_str());
     const auto select = [&](int index) {
         // Only this fixture's own HWND. Does not generate keyboard/mouse input.
         SendMessageW(own, WM_LBUTTONUP, 0, MAKELPARAM(MulDiv(30, dpi, 96),
@@ -118,5 +131,4 @@ int main(int argc, char** argv) try {
         for (int i = 1; i < 6; ++i) out << (i == 1 ? "" : ",") << after[i];
         out << "]}\n";
     }
-    CoUninitialize();
 } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
