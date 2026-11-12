@@ -875,7 +875,7 @@ struct DashboardWindow::Impl {
                              bounds.right - 10.0f, bounds.top + 25.0f));
         const float left = bounds.left + 13.0f;
         const float right = bounds.right - 13.0f;
-        const float trackTop = bounds.top + (bounds.bottom-bounds.top)*.48f;
+        const float trackTop = bounds.top + 32.0f;
         const float trackBottom = trackTop + 18.0f;
         const auto track =
             D2D1::RoundedRect(D2D1::RectF(left, trackTop, right, trackBottom),
@@ -935,8 +935,16 @@ struct DashboardWindow::Impl {
         }
     }
 
+    D2D1_RECT_F weekChartBounds{};
+    void showWeekDetails() {
+        std::wstring text;
+        constexpr const wchar_t* days[]{L"Lundi",L"Mardi",L"Mercredi",L"Jeudi",L"Vendredi",L"Samedi",L"Dimanche"};
+        for (int i=0;i<7;++i) text += std::wstring(days[i])+L" : "+formatDuration(snapshot.weekDays[i])+L"\n";
+        MessageBoxW(window,text.c_str(),L"Temps de session — semaine",MB_OK);
+    }
     void drawWeekChart(D2D1_RECT_F bounds) {
-        drawText(L"Session : lundi au dimanche", labelFormat.Get(),
+        weekChartBounds=bounds;
+        drawText(L"Temps de session — semaine (F2)", labelFormat.Get(),
                  textBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 8.0f, bounds.top + 25.0f));
@@ -944,7 +952,7 @@ struct DashboardWindow::Impl {
             L"Lun", L"Mar", L"Mer", L"Jeu", L"Ven", L"Sam", L"Dim"};
         const float chartLeft = bounds.left + 12.0f;
         const float chartRight = bounds.right - 12.0f;
-        const float chartTop = bounds.top + 52.0f;
+        const float chartTop = bounds.top + 62.0f;
         const float chartBottom = bounds.bottom - 23.0f;
         const float chartHeight = std::max(8.0f, chartBottom - chartTop);
         const float slotWidth = (chartRight - chartLeft) / 7.0f;
@@ -973,11 +981,10 @@ struct DashboardWindow::Impl {
                                          barLeft + barWidth, chartBottom));
             }
             const auto totalMinutes = std::chrono::duration_cast<std::chrono::minutes>(snapshot.weekDays[index]).count();
-            const std::wstring amount = std::to_wstring(totalMinutes / 60) + L"h" +
-                (totalMinutes % 60 < 10 ? L"0" : L"") + std::to_wstring(totalMinutes % 60);
-            drawText(amount.c_str(), amount.size()<=5?labelFormat.Get():compactNavFormat.Get(), textBrush.Get(),
-                D2D1::RectF(center-slotWidth/2, chartTop-18,
-                            center+slotWidth/2, chartTop-2),DWRITE_TEXT_ALIGNMENT_CENTER);
+            const std::wstring amount = snapshot.weekDays[index].count()==0 ? L"0 h" :
+                std::to_wstring(totalMinutes / 60) + L" h " + (totalMinutes % 60 < 10 ? L"0" : L"") + std::to_wstring(totalMinutes % 60);
+            drawText(amount.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                D2D1::RectF(center-slotWidth/2, chartTop-32, center+slotWidth/2, chartTop-2),DWRITE_TEXT_ALIGNMENT_CENTER);
             drawText(labels[index], labelFormat.Get(), textBrush.Get(),
                      D2D1::RectF(center - slotWidth / 2.0f, chartBottom + 3.0f,
                                  center + slotWidth / 2.0f, bounds.bottom - 2.0f),DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -2192,6 +2199,8 @@ struct DashboardWindow::Impl {
                                  static_cast<int>(dpi));
             const int y = MulDiv(GET_Y_LPARAM(lParam), 96,
                                  static_cast<int>(dpi));
+            if (activePage==DashboardPage::Overview && x>=weekChartBounds.left && x<weekChartBounds.right &&
+                y+contentScroll[0]>=weekChartBounds.top+26 && y+contentScroll[0]<weekChartBounds.bottom) { showWeekDetails(); return 0; }
             if (activePage==DashboardPage::Overview && y<60 && x>sidebarWidth(clientSize().width)+180) { showMetricDefinitions(); return 0; }
             const int selected = hitTestPage(x, y);
             if (selected >= 0) {
@@ -2251,6 +2260,7 @@ struct DashboardWindow::Impl {
         }
         case WM_KEYDOWN:
             if (wParam == VK_F1) { showMetricDefinitions(); return 0; }
+            if (wParam == VK_F2 && activePage==DashboardPage::Overview) { showWeekDetails(); return 0; }
             if (GetKeyState(VK_CONTROL)&0x8000) {
                 if ((wParam=='C' || wParam==VK_INSERT) && textSelection.hasSelection()) { copySelectedText(); return 0; }
                 if (wParam=='A') { textSelection.selectAll(); render(); return 0; }
