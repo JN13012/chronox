@@ -92,3 +92,13 @@ Le clic gauche sur l'icône près de l'horloge ouvre ou réactive immédiatement
 Le menu présente Ouvrir le tableau de bord en premier et comme action par défaut, puis les commandes Afficher/Masquer le widget et Widget toujours au premier plan, le lancement avec Windows et Quitter Chronox. Les séparateurs distinguent l'accès principal, les préférences du widget et la sortie. Les états cochés et les informations de démarrage Windows sont conservés.
 
 Validation : build Release PASS ; 28/28 CTest PASS (les 27 suites existantes et le nouveau test natif d'activation). Test isolé sans base ni écriture de préférences : clic immédiat avant timer, notification d'une autre icône ignorée, double clic absorbé, activation clavier, visibilité du widget conservée et commande du dashboard intacte. L'installation officielle reste inchangée.
+
+## Défilement assorti et correction UTF-8
+
+La barre des dernières sessions conserve son contrôle Win32 pour le focus et les valeurs de défilement, avec un rendu Direct2D personnalisé : piste fine, curseur arrondi de 6 DIP au repos et 8 DIP au survol/focus, cyan pendant l'interaction, sans boutons fléchés blancs. Le glissement, les clics dans la piste, la molette, les flèches clavier et les touches Début/Fin/Page précédente/suivante restent utilisables.
+
+L'encart clavier/souris a été supprimé de la vue générale ; sa place agrandit la liste de sessions. Les détails restent dans Historique et F1. Le libellé devient jours travaillés, avec singulier pour 1 ; sa définition conserve le comptage de jours locaux avec durée de session positive. Aucun changement des règles de comptabilisation.
+
+Cause de l'encodage : fichiers sources UTF-8 sans BOM interprétés selon la page de codes locale de MSVC. Les 66 fichiers sources contrôlés étaient valides en UTF-8 ; l'ancien exécutable contenait réellement la chaîne corrompue du titre. L'option /utf-8 est désormais imposée pour C/C++ sous MSVC. Un test compare accents et ponctuation compilés à leurs codes Unicode explicites, et vérifie aussi l'encodage UTF-8 des chaînes étroites. Le nouveau binaire contient le titre correct et plus sa variante corrompue.
+
+Validation : Release PASS, 28/28 CTest PASS (15,64 s), géométrie du curseur et glissement jusqu'à la dernière ligne puis retour clavier en haut PASS dans le banc à 1050 × 700 et 720 × 520. Journaux et métriques : build/review-e14/premium-scroll-*. Capture Windows encore indisponible ; appréciation visuelle à confirmer dans le banc.

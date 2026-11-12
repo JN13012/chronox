@@ -4,7 +4,9 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <ctime>
+#include <cmath>
 #include "../windows/ui_window_geometry.h"
+#include "../windows/ui_scrollbar.h"
 #include <psapi.h>
 #include <objbase.h>
 #include <algorithm>
@@ -175,7 +177,21 @@ int main(int argc, char** argv) try {
         SendMessageW(own,WM_VSCROLL,SB_TOP,reinterpret_cast<LPARAM>(listScroll)); pump();
         GetScrollInfo(listScroll,SB_CTL,&listInfo);
         if(listInfo.nPos!=0) throw std::runtime_error("Weekly scrollbar did not return to first row");
-        std::cout << "All weekly rows and independent native scrollbar: PASS\n";
+        RECT scrollRect{}; GetClientRect(listScroll,&scrollRect);
+        const auto geometry=ui::sessionScrollGeometry(scrollRect.bottom*96.f/dpi,listInfo.nMax+1,listInfo.nPage,listInfo.nPos);
+        const int x=scrollRect.right/2;
+        const int firstY=static_cast<int>(std::lround((geometry.thumbTop+geometry.thumbHeight/2)*dpi/96));
+        const int lastY=static_cast<int>(std::lround((geometry.trackBottom-geometry.thumbHeight/2)*dpi/96));
+        SendMessageW(listScroll,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,firstY));
+        SendMessageW(listScroll,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,lastY));
+        SendMessageW(listScroll,WM_LBUTTONUP,0,MAKELPARAM(x,lastY)); pump();
+        GetScrollInfo(listScroll,SB_CTL,&listInfo); GetScrollInfo(own,SB_VERT,&mainInfo);
+        if(listInfo.nPos!=listInfo.nMax-static_cast<int>(listInfo.nPage)+1 || mainInfo.nPos!=mainPosition || GetCapture()==listScroll)
+            throw std::runtime_error("Rounded scroll drag failed or moved the dashboard");
+        SendMessageW(listScroll,WM_KEYDOWN,VK_HOME,0); pump(); GetScrollInfo(listScroll,SB_CTL,&listInfo);
+        if(listInfo.nPos!=0) throw std::runtime_error("Rounded scroll keyboard navigation failed");
+        SendMessageW(listScroll,WM_KEYDOWN,VK_ESCAPE,0); pump();
+        std::cout << "Weekly scroll, rounded thumb drag and keyboard: PASS\n";
         select(1); pump();
         SYSTEMTIME first{},last{};
         const auto localDate=[](Timestamp timestamp) {

@@ -30,14 +30,14 @@ struct DashboardLayout {
     static constexpr float overviewIntroHeight = 24;
     static constexpr bool stackedCharts(float available) { return available < 600; }
     static constexpr float chartHeight(float viewportHeight) { return std::clamp(viewportHeight*.2f,120.f,160.f); }
-    static constexpr float recentHeight(float viewportHeight) { return std::clamp(viewportHeight*.34f-72,144.f,228.f); }
+    static constexpr float recentHeight(float viewportHeight) { return std::clamp(viewportHeight*.34f,216.f,300.f); }
     static constexpr float metricsHeight(float available, float cardHeight = metricHeight, int columns = 0) {
         if (!columns) columns=metricColumns(available);
         return cardHeight * (4 / columns) + gap * (4 / columns - 1);
     }
     static constexpr float overviewHeight(float available, float cardHeight = metricHeight,
                                           float viewportHeight = initialHeight, int columns = 0) {
-        return 72 + overviewIntroHeight + metricsHeight(available,cardHeight,columns) + gap +
+        return overviewIntroHeight + metricsHeight(available,cardHeight,columns) + gap +
             (stackedCharts(available)?84+gap:0) + chartHeight(viewportHeight) + gap + recentHeight(viewportHeight);
     }
     static constexpr float historyHeight = 770;

@@ -1,3 +1,9 @@
+# All sources are UTF-8. MSVC otherwise decodes BOM-less UI literals with the
+# machine code page, turning accented text and punctuation into mojibake.
+if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>")
+endif()
+
 add_library(chronox_core
    core/calendar_period.cpp
    core/session_tracker.cpp

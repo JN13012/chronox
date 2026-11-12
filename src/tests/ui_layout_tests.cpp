@@ -1,5 +1,7 @@
 #include "../windows/dashboard_layout.h"
 #include "../windows/ui_theme.h"
+#include "../windows/ui_scrollbar.h"
+#include <string_view>
 #include "../windows/dashboard_messages.h"
 #include <iostream>
 #include <stdexcept>
@@ -13,6 +15,18 @@
 
 int main() try {
     using namespace chronox::ui;
+    // Literal source text must compile identically to explicit Unicode escapes.
+    if(std::wstring_view(L"Dernières sessions · Début – Fin — Durée") !=
+       L"Derni\u00e8res sessions \u00b7 D\u00e9but \u2013 Fin \u2014 Dur\u00e9e" ||
+       std::string_view("é") != "\xc3\xa9")
+        throw std::runtime_error("UI source and execution character sets must be UTF-8");
+    const auto scroll=sessionScrollGeometry(120,125,4,0);
+    const auto end=sessionScrollGeometry(120,125,4,121);
+    if(scroll.thumbHeight<24 || scroll.thumbTop!=scroll.trackTop ||
+       std::abs(end.thumbTop+end.thumbHeight-end.trackBottom)>.01f ||
+       scroll.positionForThumb(-100)!=0 || scroll.positionForThumb(1000)!=121 ||
+       sessionScrollGeometry(120,2,4,0).maximum!=0)
+        throw std::runtime_error("Rounded scroll thumb must preserve its size and reach both endpoints");
     float previous = 0;
     for (int width = 640; width <= 1600; ++width) {
         const auto layout = DashboardLayout{static_cast<float>(width), 520};

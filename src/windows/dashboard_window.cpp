@@ -6,6 +6,7 @@
 #include "dashboard_messages.h"
 #include "dashboard_text_selection.h"
 #include "ui_text.h"
+#include "ui_scrollbar.h"
 
 #include <windows.h>
 #include "ui_window_geometry.h"
@@ -786,14 +787,17 @@ struct DashboardWindow::Impl {
         drawSelectableText(value,nullptr,textBrush.Get(),bounds,DWRITE_TEXT_ALIGNMENT_LEADING,true);
     }
 
+    static std::wstring workedDaysLabel(std::size_t days) {
+        return std::to_wstring(days)+(days==1?L" jour travaillé":L" jours travaillés");
+    }
     std::array<std::wstring,4> metricDetails() const {
-        return {L"Session du jour local", std::to_wstring(snapshot.daysWithSession[1])+L" jours avec session",
+        return {L"Session du jour local", workedDaysLabel(snapshot.daysWithSession[1]),
             L"Moy./jour : "+(snapshot.daysWithSession[2] ? ui::compactDuration(snapshot.monthDailyAverage) : std::wstring(L"—")),
-            std::to_wstring(snapshot.daysWithSession[3])+L" jours avec session"};
+            workedDaysLabel(snapshot.daysWithSession[3])};
     }
 
     void showMetricDefinitions() {
-        MessageBoxW(window,L"Session : somme des contributions comptabilisées dans la période locale.\nJours avec session : jours locaux dont la durée est strictement positive.\nMoyenne mensuelle : temps de session / jours avec session positive.\nActivité : clavier/souris uniquement pendant les portions couvertes par V3. Une absence de mesure ne signifie pas zéro activité. La couverture peut être partielle. Aucun taux n'est extrapolé.\nIncertain : une anomalie de mesure a été signalée ; consulter Historique pour les détails.",L"Définition des indicateurs",MB_OK|MB_ICONINFORMATION);
+        MessageBoxW(window,L"Session : somme des contributions comptabilisées dans la période locale.\nJours travaillés : jours locaux avec une durée de session comptabilisée strictement positive. Cet indicateur ne constitue pas une preuve de travail effectif.\nMoyenne mensuelle : temps de session / jours travaillés selon cette définition.\nActivité : clavier/souris uniquement pendant les portions couvertes par V3. Une absence de mesure ne signifie pas zéro activité. La couverture peut être partielle. Aucun taux n'est extrapolé.\nIncertain : une anomalie de mesure a été signalée ; consulter Historique pour les détails.",L"Définition des indicateurs",MB_OK|MB_ICONINFORMATION);
     }
 
     std::array<std::wstring,4> overviewSizingDetails{};
@@ -858,13 +862,7 @@ struct DashboardWindow::Impl {
                      D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
                                 y + sizing.activityTop() + sizing.activityHeight));
         }
-        const float activityTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap;
-        drawCard(D2D1::RectF(left,activityTop,right,activityTop+62));
-        const auto measured = [&](int i) { return snapshot.activityMeasured[i] ? ui::compactDuration(snapshot.activityDurations[i]) : L"Non mesurée"; };
-        const auto activity = L"Clavier/souris  ·  Aujourd'hui : " + measured(0) + L"  ·  Semaine : " + measured(1);
-        drawText(activity.c_str(),activityFormat.Get(),cyanBrush.Get(),D2D1::RectF(left+12,activityTop+7,right-12,activityTop+39));
-        drawText(L"Couverture limitée aux portions mesurées · Détails : F1",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(left+12,activityTop+40,right-12,activityTop+58));
-        const float chartsTop = activityTop + 62 + gap;
+        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap;
         const float chartHeight=ui::DashboardLayout::chartHeight(clientSize().height);
         const bool stacked=ui::DashboardLayout::stackedCharts(width);
         const float chartWidth = stacked?width:(width-gap)/2;
@@ -1002,7 +1000,10 @@ struct DashboardWindow::Impl {
     HWND recentScrollbar{};
     std::size_t recentVisibleRows{},recentMaximumOffset{};
     RECT recentScrollbarRect{};
-    bool recentScrollbarVisible{};
+    bool recentScrollbarVisible{},recentScrollHot{},recentScrollDragging{};
+    float recentScrollGrab{};
+    ComPtr<ID2D1DCRenderTarget> recentScrollTarget;
+    ComPtr<ID2D1SolidColorBrush> recentScrollBrush;
     static constexpr int RecentScrollbarId=3301;
     static constexpr float SessionRowsTop=57;
     std::vector<DashboardSession> historyRows;
@@ -1030,7 +1031,9 @@ struct DashboardWindow::Impl {
         SCROLLINFO info{sizeof(SCROLLINFO),SIF_RANGE|SIF_PAGE|SIF_POS};
         info.nMax=static_cast<int>(snapshot.recentSessions.size())-1; info.nPage=static_cast<UINT>(visible); info.nPos=static_cast<int>(recentScrollOffset);
         SCROLLINFO old{sizeof(SCROLLINFO),SIF_RANGE|SIF_PAGE|SIF_POS}; GetScrollInfo(recentScrollbar,SB_CTL,&old);
-        if(old.nMax!=info.nMax || old.nPage!=info.nPage || old.nPos!=info.nPos) SetScrollInfo(recentScrollbar,SB_CTL,&info,TRUE);
+        if(old.nMax!=info.nMax || old.nPage!=info.nPage || old.nPos!=info.nPos) {
+            SetScrollInfo(recentScrollbar,SB_CTL,&info,FALSE); InvalidateRect(recentScrollbar,nullptr,FALSE);
+        }
         if(!recentScrollbarVisible) { ShowWindow(recentScrollbar,SW_SHOWNA); recentScrollbarVisible=true; }
     }
     void scrollRecentSessions(int action) {
@@ -1048,9 +1051,95 @@ struct DashboardWindow::Impl {
         recentScrollOffset=static_cast<std::size_t>(std::clamp(position,0,static_cast<int>(recentMaximumOffset)));
         cancelTextSelection(); render();
     }
+    ui::SessionScrollGeometry recentScrollGeometry() const {
+        RECT rect{}; GetClientRect(recentScrollbar,&rect);
+        return ui::sessionScrollGeometry(rect.bottom*96.f/dpi,static_cast<int>(snapshot.recentSessions.size()),
+            static_cast<int>(recentVisibleRows),static_cast<int>(recentScrollOffset));
+    }
+    void setRecentScrollPosition(int position) {
+        const auto next=static_cast<std::size_t>(std::clamp(position,0,static_cast<int>(recentMaximumOffset)));
+        if(next==recentScrollOffset) return;
+        recentScrollOffset=next; cancelTextSelection(); render();
+    }
+    void paintRecentScrollbar(HDC dc,const RECT& rect) {
+        if(!recentScrollTarget) {
+            const auto properties=D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_IGNORE));
+            checkHr(d2dFactory->CreateDCRenderTarget(&properties,&recentScrollTarget),"Create session scroll render target");
+            checkHr(recentScrollTarget->CreateSolidColorBrush(D2D1::ColorF(0,0,0),&recentScrollBrush),"Create session scroll brush");
+        }
+        checkHr(recentScrollTarget->BindDC(dc,&rect),"Bind session scroll DC");
+        recentScrollTarget->SetDpi(static_cast<float>(dpi),static_cast<float>(dpi));
+        const auto color=[](ui::Rgb c) { return D2D1::ColorF(c.r/255.f,c.g/255.f,c.b/255.f); };
+        const auto geometry=recentScrollGeometry();
+        const float center=(rect.right-rect.left)*48.f/dpi;
+        const bool highlighted=recentScrollHot || recentScrollDragging || GetFocus()==recentScrollbar;
+        const float halfWidth=highlighted?4.f:3.f;
+        recentScrollTarget->BeginDraw();
+        recentScrollTarget->Clear(color(ui::palette::panel));
+        recentScrollBrush->SetColor(color(ui::palette::hover));
+        recentScrollTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(center-1,geometry.trackTop,
+            center+1,geometry.trackBottom),1,1),recentScrollBrush.Get());
+        recentScrollBrush->SetColor(color(highlighted?ui::palette::cyan:ui::palette::border));
+        recentScrollTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(center-halfWidth,geometry.thumbTop,
+            center+halfWidth,geometry.thumbTop+geometry.thumbHeight),halfWidth,halfWidth),recentScrollBrush.Get());
+        const auto result=recentScrollTarget->EndDraw();
+        if(result==D2DERR_RECREATE_TARGET) { recentScrollBrush.Reset(); recentScrollTarget.Reset(); InvalidateRect(recentScrollbar,nullptr,FALSE); }
+        else checkHr(result,"Draw session scroll");
+    }
     static LRESULT CALLBACK recentScrollbarProcedure(HWND control,UINT message,WPARAM wParam,LPARAM lParam,UINT_PTR,DWORD_PTR data) {
         auto* self=reinterpret_cast<Impl*>(data);
-        if(message==WM_KEYDOWN && (wParam==VK_TAB || wParam==VK_ESCAPE)) { SetFocus(self->window); return 0; }
+        try {
+            switch(message) {
+            case WM_ERASEBKGND: return 1;
+            case WM_PAINT: {
+                PAINTSTRUCT paint{}; const auto dc=BeginPaint(control,&paint);
+                struct PaintLifetime { HWND window; PAINTSTRUCT* paint; ~PaintLifetime() { EndPaint(window,paint); } } scope{control,&paint};
+                RECT rect{}; GetClientRect(control,&rect); self->paintRecentScrollbar(dc,rect); return 0;
+            }
+            case WM_SETFOCUS:
+            case WM_KILLFOCUS: InvalidateRect(control,nullptr,FALSE); return 0;
+            case WM_SETCURSOR: SetCursor(LoadCursorW(nullptr,IDC_ARROW)); return TRUE;
+            case WM_LBUTTONDOWN:
+            case WM_LBUTTONDBLCLK: {
+                SetFocus(control);
+                const float y=GET_Y_LPARAM(lParam)*96.f/self->dpi;
+                const auto geometry=self->recentScrollGeometry();
+                if(y>=geometry.thumbTop && y<=geometry.thumbTop+geometry.thumbHeight) {
+                    self->recentScrollGrab=y-geometry.thumbTop; self->recentScrollDragging=true; SetCapture(control);
+                } else self->scrollRecentSessions(y<geometry.thumbTop?SB_PAGEUP:SB_PAGEDOWN);
+                InvalidateRect(control,nullptr,FALSE); return 0;
+            }
+            case WM_MOUSEMOVE:
+                if(!self->recentScrollHot) {
+                    self->recentScrollHot=true;
+                    TRACKMOUSEEVENT track{sizeof(TRACKMOUSEEVENT),TME_LEAVE,control,0}; TrackMouseEvent(&track);
+                    InvalidateRect(control,nullptr,FALSE);
+                }
+                if(self->recentScrollDragging && GetCapture()==control)
+                    self->setRecentScrollPosition(self->recentScrollGeometry().positionForThumb(GET_Y_LPARAM(lParam)*96.f/self->dpi-self->recentScrollGrab));
+                return 0;
+            case WM_MOUSELEAVE: self->recentScrollHot=false; InvalidateRect(control,nullptr,FALSE); return 0;
+            case WM_LBUTTONUP:
+                if(self->recentScrollDragging) { self->recentScrollDragging=false; if(GetCapture()==control) ReleaseCapture(); }
+                InvalidateRect(control,nullptr,FALSE); return 0;
+            case WM_CAPTURECHANGED: self->recentScrollDragging=false; InvalidateRect(control,nullptr,FALSE); return 0;
+            case WM_MOUSEWHEEL: return SendMessageW(self->window,message,wParam,lParam);
+            case WM_KEYDOWN:
+                switch(wParam) {
+                case VK_TAB:
+                case VK_ESCAPE: SetFocus(self->window); return 0;
+                case VK_HOME: self->scrollRecentSessions(SB_TOP); return 0;
+                case VK_END: self->scrollRecentSessions(SB_BOTTOM); return 0;
+                case VK_UP: self->scrollRecentSessions(SB_LINEUP); return 0;
+                case VK_DOWN: self->scrollRecentSessions(SB_LINEDOWN); return 0;
+                case VK_PRIOR: self->scrollRecentSessions(SB_PAGEUP); return 0;
+                case VK_NEXT: self->scrollRecentSessions(SB_PAGEDOWN); return 0;
+                }
+                break;
+            case WM_NCDESTROY: RemoveWindowSubclass(control,recentScrollbarProcedure,3); break;
+            }
+        } catch(...) { self->errorHandler(std::current_exception()); return 0; }
         return DefSubclassProc(control,message,wParam,lParam);
     }
 
@@ -1503,7 +1592,7 @@ struct DashboardWindow::Impl {
             formatDuration(std::chrono::seconds(activeHistory->duration.count() /
                 static_cast<std::int64_t>(activeHistory->daysWithActivity)));
         const std::wstring secondary = std::to_wstring(activeHistory->sessions.size()) +
-            L" session(s) / Moyenne par jour avec session : " + average;
+            L" session(s) / Moyenne par jour travaillé : " + average;
         drawText(secondary.c_str(), activityFormat.Get(), mutedBrush.Get(),
                  D2D1::RectF(bounds.left, bounds.top + 124, bounds.right, bounds.bottom));
     }
