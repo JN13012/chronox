@@ -116,7 +116,6 @@ struct ChronoxWidget::Impl {
     bool trayIconAdded{};
     bool refreshTimerSet{};
     bool widgetClickPending{};
-    bool trayClickPending{};
     bool ignoreNextTrayClick{};
     UINT taskbarCreatedMessage{};
     bool counterPressPending{};
@@ -713,7 +712,7 @@ struct ChronoxWidget::Impl {
     }
 
     void showContextMenu() {
-        cancelPendingTrayClick();
+        resetTrayActivation();
         HMENU menu = CreatePopupMenu();
         if (menu == nullptr) {
             throw windowsError("CreatePopupMenu(widget)", GetLastError());
@@ -725,12 +724,13 @@ struct ChronoxWidget::Impl {
                 throw windowsError("AppendMenuW(widget)", error);
             }
         };
-        const auto toggleText = IsWindowVisible(window) ? L"Masquer Chronox"
-                                                        : L"Afficher Chronox";
-        append(MF_STRING, MenuToggleWidget, toggleText);
         append(MF_STRING, MenuOpenDashboard, L"Ouvrir le tableau de bord");
+        append(MF_SEPARATOR, 0, nullptr);
+        const auto toggleText = IsWindowVisible(window) ? L"Masquer le widget"
+                                                        : L"Afficher le widget";
+        append(MF_STRING, MenuToggleWidget, toggleText);
         append(MF_STRING | (alwaysOnTop ? MF_CHECKED : 0),
-               MenuAlwaysOnTop, L"Toujours au premier plan");
+               MenuAlwaysOnTop, L"Widget toujours au premier plan");
         append(MF_SEPARATOR, 0, nullptr);
         const StartupState startupState = startupStateProvider();
         const wchar_t* startupText = L"Lancer Chronox avec Windows";
@@ -746,6 +746,10 @@ struct ChronoxWidget::Impl {
                MenuStartup, startupText);
         append(MF_SEPARATOR, 0, nullptr);
         append(MF_STRING, MenuExit, L"Quitter Chronox");
+        if (!SetMenuDefaultItem(menu, MenuOpenDashboard, FALSE)) {
+            const DWORD error=GetLastError(); DestroyMenu(menu);
+            throw windowsError("SetMenuDefaultItem(tray)",error);
+        }
         POINT position{};
         if (!GetCursorPos(&position)) {
             const DWORD error = GetLastError();
@@ -774,36 +778,24 @@ struct ChronoxWidget::Impl {
         switch (LOWORD(lParam)) {
         case NIN_SELECT:
         case WM_LBUTTONUP:
-            if (!ignoreNextTrayClick) {
-                queueTrayClick();
-            }
-            break;
         case WM_LBUTTONDBLCLK:
-            cancelPendingTrayClick();
-            ignoreTrailingTrayClick();
-            dashboardOpenHandler();
-            break;
         case NIN_KEYSELECT:
-            cancelPendingTrayClick();
-            toggleVisibility();
+            // Open on the first activation, with no single-click delay. The shell
+            // can send several notifications for the same double-click gesture.
+            if (!ignoreNextTrayClick) {
+                ignoreTrailingTrayClick();
+                dashboardOpenHandler();
+            }
             break;
         case WM_RBUTTONUP:
         case WM_CONTEXTMENU:
             cancelPendingWidgetClick();
-            cancelPendingTrayClick();
+            resetTrayActivation();
             showContextMenu();
             break;
         default:
             break;
         }
-    }
-
-    void queueTrayClick() {
-        if (SetTimer(window, TrayClickTimerId, GetDoubleClickTime(), nullptr) ==
-            0) {
-            throw windowsError("SetTimer(tray click)", GetLastError());
-        }
-        trayClickPending = true;
     }
 
     void ignoreTrailingTrayClick() {
@@ -814,14 +806,14 @@ struct ChronoxWidget::Impl {
         }
     }
 
-    void cancelPendingTrayClick() {
-        if (!trayClickPending) {
+    void resetTrayActivation() {
+        if (!ignoreNextTrayClick) {
             return;
         }
         if (!KillTimer(window, TrayClickTimerId)) {
             throw windowsError("KillTimer(tray click)", GetLastError());
         }
-        trayClickPending = false;
+        ignoreNextTrayClick = false;
     }
 
     void queueWidgetClick() {
@@ -920,12 +912,6 @@ struct ChronoxWidget::Impl {
                                        GetLastError());
                 }
                 ignoreNextTrayClick = false;
-            } else if (wParam == TrayClickTimerId && trayClickPending) {
-                if (!KillTimer(hwnd, TrayClickTimerId)) {
-                    throw windowsError("KillTimer(tray click)", GetLastError());
-                }
-                trayClickPending = false;
-                toggleVisibility();
             } else if (wParam == WidgetClickTimerId && widgetClickPending) {
                 if (!KillTimer(hwnd, WidgetClickTimerId)) {
                     throw windowsError("KillTimer(widget click)", GetLastError());

@@ -84,3 +84,11 @@ Le titre dispose désormais de 26 DIP de hauteur, sans changer sa police ni son 
 Validation : build Release PASS ; 27/27 CTest PASS (13,66 s). Régressions : 80 sessions hebdomadaires sans limite de 50, exclusion de la semaine précédente, découpage à la frontière du lundi, métriques DirectWrite du titre. Banc fictif avec 125 lignes : défilement jusqu'à la dernière ligne puis retour en haut sans déplacement du dashboard, PASS à 1050 × 700 et 720 × 520 ; filtre inclusif et cache de dessin toujours PASS.
 
 L'installation officielle et son processus observé pendant cette correction n'ont pas été remplacés ni arrêtés. Capture Windows toujours indisponible ; inspection visuelle du résultat à confirmer dans le banc.
+
+## Icône de notification — ouverture et menu
+
+Le clic gauche sur l'icône près de l'horloge ouvre ou réactive immédiatement le dashboard. L'activation clavier suit la même action ; les notifications répétées d'un double clic sont absorbées. Ces activations ne montrent ni ne masquent le widget.
+
+Le menu présente Ouvrir le tableau de bord en premier et comme action par défaut, puis les commandes Afficher/Masquer le widget et Widget toujours au premier plan, le lancement avec Windows et Quitter Chronox. Les séparateurs distinguent l'accès principal, les préférences du widget et la sortie. Les états cochés et les informations de démarrage Windows sont conservés.
+
+Validation : build Release PASS ; 28/28 CTest PASS (les 27 suites existantes et le nouveau test natif d'activation). Test isolé sans base ni écriture de préférences : clic immédiat avant timer, notification d'une autre icône ignorée, double clic absorbé, activation clavier, visibilité du widget conservée et commande du dashboard intacte. L'installation officielle reste inchangée.
