@@ -1,0 +1,98 @@
+{
+  "method": "Overview, standard fixture state; same data; separate processes; all pages warmed, then 3 seconds warm-up and 20 seconds idle sample; CPU percent of one core; arrays private bytes, working set bytes, handles, GDI, USER. No build or tests during acquisition. Short samples, not endurance.",
+  "binary_sha256": {
+    "build\\ui-reference\\before-review.exe": "BEE8E27095E26D517A408372CA43220057F91A93A0A80916F939ED0488FCD394",
+    "build\\src\\Release\\chronox_dashboard_review.exe": "E23E76C38AA2E1C58E6AD1117F5E6B1737A6C1473C02B88105F407EC995B9245",
+    "build\\src\\Release\\chronox.exe": "AEFC4211A302BE21CDDC41282F35C2672C915B1E8BE1AFE04B5EA4BBB8885655"
+  },
+  "samples": [
+    {
+      "before": {
+        "page": 0,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0068,
+        "cpu_one_core_percent": 0.780983,
+        "before": [
+          35160064,
+          45232128,
+          1041,
+          15,
+          21
+        ],
+        "after": [
+          35594240,
+          47755264,
+          1067,
+          17,
+          21
+        ]
+      },
+      "after": {
+        "page": 0,
+        "width": 1050,
+        "height": 700,
+        "seconds": 20.0027,
+        "cpu_one_core_percent": 0.937375,
+        "before": [
+          34889728,
+          45568000,
+          1041,
+          15,
+          21
+        ],
+        "after": [
+          41410560,
+          48238592,
+          1067,
+          15,
+          22
+        ]
+      }
+    },
+    {
+      "before": {
+        "page": 0,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0045,
+        "cpu_one_core_percent": 0.0781073,
+        "before": [
+          32485376,
+          45236224,
+          1041,
+          15,
+          21
+        ],
+        "after": [
+          32546816,
+          45281280,
+          1042,
+          15,
+          20
+        ]
+      },
+      "after": {
+        "page": 0,
+        "width": 720,
+        "height": 520,
+        "seconds": 20.0148,
+        "cpu_one_core_percent": 0.0780673,
+        "before": [
+          32890880,
+          45576192,
+          1041,
+          15,
+          21
+        ],
+        "after": [
+          32935936,
+          45613056,
+          1042,
+          15,
+          20
+        ]
+      }
+    }
+  ]
+}

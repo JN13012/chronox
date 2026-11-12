@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <cwchar>
@@ -360,6 +361,9 @@ struct DashboardWindow::Impl {
     ComPtr<ID2D1SolidColorBrush> textBrush;
     ComPtr<ID2D1SolidColorBrush> mutedBrush;
     ComPtr<ID2D1SolidColorBrush> borderBrush;
+    ComPtr<ID2D1LinearGradientBrush> metalGradient;
+    ComPtr<ID2D1LinearGradientBrush> canvasGradient;
+    ComPtr<ID2D1LinearGradientBrush> sessionGradient;
     ComPtr<IDWriteTextFormat> brandFormat;
     ComPtr<IDWriteTextFormat> pageFormat;
     ComPtr<IDWriteTextFormat> titleFormat;
@@ -537,6 +541,20 @@ struct DashboardWindow::Impl {
     }
 
     void createBrushes() {
+        const auto gradient = [&](ui::Rgb first, ui::Rgb last,
+                                  ComPtr<ID2D1LinearGradientBrush>& brush) {
+            const D2D1_GRADIENT_STOP stops[]{{0, color(first)}, {1, color(last)}};
+            ComPtr<ID2D1GradientStopCollection> collection;
+            checkHr(renderTarget->CreateGradientStopCollection(stops, 2, &collection),
+                    "Create dashboard gradient stops");
+            brush.Reset();
+            checkHr(renderTarget->CreateLinearGradientBrush(
+                D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, 1)),
+                collection.Get(), &brush), "Create dashboard gradient");
+        };
+        gradient(ui::palette::steel, ui::palette::panel, metalGradient);
+        gradient(ui::palette::sidebar, ui::palette::background, canvasGradient);
+        gradient(ui::palette::cyan, ui::palette::accent, sessionGradient);
         checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::selection), &selectionBrush),
                 "CreateSolidColorBrush(dashboard selection)");
         checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::background),
@@ -570,6 +588,9 @@ struct DashboardWindow::Impl {
 
     void releaseRenderResources() noexcept {
         renderTarget.Reset();
+        metalGradient.Reset();
+        canvasGradient.Reset();
+        sessionGradient.Reset();
         backgroundBrush.Reset();
         sidebarBrush.Reset();
         panelBrush.Reset();
@@ -599,11 +620,17 @@ struct DashboardWindow::Impl {
         }
         renderTarget->BeginDraw();
         renderTarget->Clear(color(ui::palette::background));
+        canvasGradient->SetStartPoint(D2D1::Point2F(0, 0));
+        canvasGradient->SetEndPoint(D2D1::Point2F(clientSize().width, clientSize().height));
+        renderTarget->FillRectangle(D2D1::RectF(0, 0, clientSize().width, clientSize().height), canvasGradient.Get());
         drawSidebar();
         drawContent();
         const HRESULT result = renderTarget->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
             renderTarget.Reset();
+            metalGradient.Reset();
+            canvasGradient.Reset();
+            sessionGradient.Reset();
             backgroundBrush.Reset();
             sidebarBrush.Reset();
             panelBrush.Reset();
@@ -627,10 +654,62 @@ struct DashboardWindow::Impl {
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
-    void drawCard(D2D1_RECT_F bounds) {
+    void drawCard(D2D1_RECT_F bounds, bool highlighted = false) {
         const auto card = D2D1::RoundedRect(bounds, ui::space::cardRadius, ui::space::cardRadius);
-        renderTarget->FillRoundedRectangle(card, panelHoverBrush.Get());
-        renderTarget->DrawRoundedRectangle(card, borderBrush.Get(), 0.8f);
+        metalGradient->SetStartPoint(D2D1::Point2F(bounds.left, bounds.top));
+        metalGradient->SetEndPoint(D2D1::Point2F(bounds.right, bounds.bottom));
+        renderTarget->FillRoundedRectangle(card, metalGradient.Get());
+        if (highlighted) {
+            cyanBrush->SetOpacity(.12f);
+            renderTarget->DrawRoundedRectangle(card, cyanBrush.Get(), 5);
+            cyanBrush->SetOpacity(1);
+        }
+        renderTarget->DrawRoundedRectangle(card, highlighted ? cyanBrush.Get() : borderBrush.Get(), highlighted ? 1.4f : .8f);
+        if (highlighted) {
+            renderTarget->DrawLine(D2D1::Point2F(bounds.left + 18, bounds.bottom - 1),
+                                  D2D1::Point2F(bounds.right - 18, bounds.bottom - 1), cyanBrush.Get(), 2);
+        }
+    }
+
+    // Small vector marks: no font dependency, bitmaps, animations or input hooks.
+    void drawIcon(int kind, float x, float y, float size, ID2D1Brush* brush) {
+        const auto line = [&](float ax, float ay, float bx, float by) {
+            renderTarget->DrawLine(D2D1::Point2F(x + ax * size, y + ay * size),
+                                  D2D1::Point2F(x + bx * size, y + by * size), brush, 1.6f);
+        };
+        if (kind == 0) { // home
+            line(.1f,.45f,.5f,.1f); line(.5f,.1f,.9f,.45f);
+            line(.2f,.4f,.2f,.9f); line(.8f,.4f,.8f,.9f); line(.2f,.9f,.8f,.9f);
+            line(.43f,.9f,.43f,.65f); line(.43f,.65f,.6f,.65f); line(.6f,.65f,.6f,.9f);
+        } else if (kind == 1) { // chart
+            for (int i=0; i<3; ++i) {
+                const float bx = x + size * (.15f + i * .3f);
+                renderTarget->FillRoundedRectangle(D2D1::RoundedRect(
+                    D2D1::RectF(bx, y + size * (.6f - i * .22f), bx + size * .13f, y + size * .9f), 1, 1), brush);
+            }
+        } else if (kind == 2) { // settings
+            renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(x+size*.5f,y+size*.5f),size*.29f,size*.29f),brush,1.6f);
+            renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(x+size*.5f,y+size*.5f),size*.1f,size*.1f),brush,1.6f);
+            for(int i=0;i<8;++i) {
+                const float a = i * 3.14159265f / 4;
+                line(.5f+.31f*std::cos(a),.5f+.31f*std::sin(a),.5f+.45f*std::cos(a),.5f+.45f*std::sin(a));
+            }
+        } else if (kind == 3) { // calendar
+            renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x+size*.15f,y+size*.2f,x+size*.85f,y+size*.9f),2,2),brush,1.5f);
+            line(.15f,.4f,.85f,.4f); line(.32f,.08f,.32f,.3f); line(.68f,.08f,.68f,.3f);
+            line(.35f,.6f,.65f,.6f); line(.35f,.74f,.55f,.74f);
+        } else { // clock / Chronox mark
+            renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(x+size*.5f,y+size*.5f),size*.4f,size*.4f),brush,2);
+            line(.5f,.22f,.5f,.5f); line(.5f,.5f,.72f,.64f);
+        }
+    }
+
+    void fillSessionBar(D2D1_RECT_F bounds) {
+        sessionGradient->SetStartPoint(D2D1::Point2F(bounds.left, bounds.top));
+        sessionGradient->SetEndPoint(D2D1::Point2F(bounds.left, bounds.bottom));
+        const auto shape = D2D1::RoundedRect(bounds, 4, 4);
+        renderTarget->FillRoundedRectangle(shape, sessionGradient.Get());
+        renderTarget->DrawRoundedRectangle(shape, cyanBrush.Get(), .7f);
     }
 
     void drawMetric(const std::wstring& value, D2D1_RECT_F bounds) {
@@ -663,8 +742,12 @@ struct DashboardWindow::Impl {
         case ActivityState::Uncertain: activityLabel = L"Mesure incertaine"; break;
         }
         const auto status = ui::trackingStatus(snapshot.trackingActive, activityLabel, snapshot.activityDetectionEnabled);
+        drawCard(D2D1::RectF(left, top, right, top + 36));
+        const bool active = snapshot.activityState == ActivityState::Active;
+        renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(left+14,top+13),4,4),
+                                  active ? cyanBrush.Get() : mutedBrush.Get());
         drawText(status.c_str(), labelFormat.Get(), textBrush.Get(),
-                 D2D1::RectF(left, top, right, top + 36));
+                 D2D1::RectF(left + 28, top + 2, right - 10, top + 35));
         const bool measured = std::any_of(snapshot.activityMeasured.begin(), snapshot.activityMeasured.end(), [](bool v) { return v; });
         drawMeasurementNotice(left, right, top + 38, measured, snapshot.timeUncertain);
         const float width = right - left;
@@ -679,9 +762,10 @@ struct DashboardWindow::Impl {
         for (int i = 0; i < 4; ++i) {
             const float x = left + (i % columns) * (cardWidth + gap);
             const float y = metricsTop + (i / columns) * (ui::DashboardLayout::metricHeight + gap);
-            drawCard(D2D1::RectF(x, y, x + cardWidth, y + ui::DashboardLayout::metricHeight));
+            drawCard(D2D1::RectF(x, y, x + cardWidth, y + ui::DashboardLayout::metricHeight), i == 0);
+            drawIcon(3, x+12, y+7, 20, cyanBrush.Get());
             drawText(labels[i].c_str(), labelFormat.Get(), cyanBrush.Get(),
-                     D2D1::RectF(x + 12, y + 8, x + cardWidth - 12, y + 25));
+                     D2D1::RectF(x + 40, y + 8, x + cardWidth - 12, y + 25));
             drawText(L"TEMPS DE SESSION", labelFormat.Get(), mutedBrush.Get(),
                      D2D1::RectF(x + 12, y + 28, x + cardWidth - 12, y + 45));
             drawMetric(formatDuration(values[i]), D2D1::RectF(x + 12, y + 46, x + cardWidth - 12, y + 110));
@@ -692,25 +776,26 @@ struct DashboardWindow::Impl {
         }
         const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width) + gap;
         const float chartWidth = (width - gap) / 2;
-        const auto timeline = D2D1::RectF(left, chartsTop, left + chartWidth, chartsTop + 154);
-        const auto week = D2D1::RectF(left + chartWidth + gap, chartsTop, right, chartsTop + 154);
+        const auto timeline = D2D1::RectF(left, chartsTop, left + chartWidth, chartsTop + 180);
+        const auto week = D2D1::RectF(left + chartWidth + gap, chartsTop, right, chartsTop + 180);
         drawCard(timeline); drawCard(week); drawTimeline(timeline); drawWeekChart(week);
-        const auto sessions = D2D1::RectF(left, chartsTop + 154 + gap, right, bottom);
+        const auto sessions = D2D1::RectF(left, chartsTop + 180 + gap, right, bottom);
         drawCard(sessions); drawRecentSessions(sessions);
     }
 
     void drawTimeline(D2D1_RECT_F bounds) {
-        drawText(L"SESSION : FRISE DU JOUR", compactNavFormat.Get(), cyanBrush.Get(),
+        drawText(L"Session : frise du jour", labelFormat.Get(), textBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 10.0f, bounds.top + 25.0f));
         const float left = bounds.left + 13.0f;
         const float right = bounds.right - 13.0f;
-        const float trackTop = bounds.top + 43.0f;
+        const float trackTop = bounds.top + 80.0f;
         const float trackBottom = trackTop + 18.0f;
         const auto track =
             D2D1::RoundedRect(D2D1::RectF(left, trackTop, right, trackBottom),
                               4.0f, 4.0f);
         renderTarget->FillRoundedRectangle(track, panelBrush.Get());
+        renderTarget->DrawRoundedRectangle(track, borderBrush.Get(), .8f);
         const auto dayDuration = snapshot.todayRange.end - snapshot.todayRange.start;
         if (dayDuration <= 0) {
             throw std::runtime_error("Dashboard received invalid local day bounds");
@@ -736,11 +821,7 @@ struct DashboardWindow::Impl {
             if (segmentRight <= segmentLeft) {
                 continue;
             }
-            renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(
-                    D2D1::RectF(segmentLeft, trackTop, segmentRight, trackBottom),
-                    3.0f, 3.0f),
-                accentBrush.Get());
+            fillSessionBar(D2D1::RectF(segmentLeft, trackTop, segmentRight, trackBottom));
         }
         constexpr std::array<const wchar_t*, 5> labels{
             L"00", L"06", L"12", L"18", L"24"};
@@ -769,15 +850,15 @@ struct DashboardWindow::Impl {
     }
 
     void drawWeekChart(D2D1_RECT_F bounds) {
-        drawText(L"SESSION : HEURES / LUNDI AU DIMANCHE", compactNavFormat.Get(),
-                 cyanBrush.Get(),
+        drawText(L"Session : lundi au dimanche", labelFormat.Get(),
+                 textBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 8.0f, bounds.top + 25.0f));
         constexpr std::array<const wchar_t*, 7> labels{
             L"Lun", L"Mar", L"Mer", L"Jeu", L"Ven", L"Sam", L"Dim"};
         const float chartLeft = bounds.left + 12.0f;
         const float chartRight = bounds.right - 12.0f;
-        const float chartTop = bounds.top + 34.0f;
+        const float chartTop = bounds.top + 60.0f;
         const float chartBottom = bounds.bottom - 23.0f;
         const float chartHeight = std::max(8.0f, chartBottom - chartTop);
         const float slotWidth = (chartRight - chartLeft) / 7.0f;
@@ -791,7 +872,7 @@ struct DashboardWindow::Impl {
         for (std::size_t index = 0; index < snapshot.weekDays.size(); ++index) {
             const float center =
                 chartLeft + slotWidth * (static_cast<float>(index) + 0.5f);
-            const float barWidth = std::min(18.0f, slotWidth * 0.52f);
+            const float barWidth = std::min(44.0f, slotWidth * 0.62f);
             const float barLeft = center - barWidth / 2.0f;
             renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(
@@ -802,35 +883,37 @@ struct DashboardWindow::Impl {
                 static_cast<double>(snapshot.weekDays[index].count()) /
                 maxSeconds * chartHeight);
             if (valueHeight > 0.0f) {
-                renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(
-                        D2D1::RectF(barLeft, chartBottom - valueHeight,
-                                    barLeft + barWidth, chartBottom),
-                        4.0f, 4.0f),
-                    index == 6 ? cyanBrush.Get() : accentBrush.Get());
+                fillSessionBar(D2D1::RectF(barLeft, chartBottom - valueHeight,
+                                         barLeft + barWidth, chartBottom));
             }
-            drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
+            const auto totalMinutes = std::chrono::duration_cast<std::chrono::minutes>(snapshot.weekDays[index]).count();
+            const std::wstring amount = std::to_wstring(totalMinutes / 60) + L"h" +
+                (totalMinutes % 60 < 10 ? L"0" : L"") + std::to_wstring(totalMinutes % 60);
+            drawText(amount.c_str(), compactNavFormat.Get(), textBrush.Get(),
+                D2D1::RectF(center-slotWidth/2, chartBottom-valueHeight-18,
+                            center+slotWidth/2, chartBottom-valueHeight-2));
+            drawText(labels[index], compactNavFormat.Get(), textBrush.Get(),
                      D2D1::RectF(center - slotWidth / 2.0f, chartBottom + 3.0f,
                                  center + slotWidth / 2.0f, bounds.bottom - 2.0f));
         }
     }
 
     void drawRecentSessions(D2D1_RECT_F bounds) {
-        drawText(L"DERNI\u00c8RES SESSIONS", compactNavFormat.Get(),
-                 cyanBrush.Get(),
+        drawText(L"Derni\u00e8res sessions", navFormat.Get(),
+                 textBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 10.0f, bounds.top + 24.0f));
         if (bounds.bottom - bounds.top < 78.0f) {
             return;
         }
-        const float headerTop = bounds.top + 30.0f;
+        const float headerTop = bounds.top + 40.0f;
         renderTarget->DrawLine(D2D1::Point2F(bounds.left + 12.0f, headerTop + 16.0f),
                                D2D1::Point2F(bounds.right - 12.0f, headerTop + 16.0f),
                                borderBrush.Get(), 0.8f);
         const float width = bounds.right - bounds.left - 24.0f;
         const float startColumn = bounds.left + 12.0f;
-        const float endColumn = startColumn + width * 0.38f;
-        const float durationColumn = startColumn + width * 0.76f;
+        const float endColumn = startColumn + width * 0.32f;
+        const float durationColumn = startColumn + width * 0.64f;
         drawText(L"D\u00c9BUT", compactNavFormat.Get(), mutedBrush.Get(),
                  D2D1::RectF(startColumn, headerTop, endColumn - 4.0f,
                              headerTop + 15.0f));
@@ -845,7 +928,7 @@ struct DashboardWindow::Impl {
         const float availableHeight = bounds.bottom - rowsTop - 6.0f;
         const std::size_t rowLimit = availableHeight > 0.0f
                                          ? static_cast<std::size_t>(
-                                               availableHeight / 21.0f)
+                                               availableHeight / 38.0f)
                                          : 0;
         const std::size_t rowCount =
             std::min(rowLimit, snapshot.recentSessions.size());
@@ -858,22 +941,27 @@ struct DashboardWindow::Impl {
         }
         for (std::size_t index = 0; index < rowCount; ++index) {
             const auto& session = snapshot.recentSessions[index];
-            const float rowTop = rowsTop + static_cast<float>(index) * 21.0f;
+            const float rowTop = rowsTop + static_cast<float>(index) * 38.0f;
+            if (index % 2 == 0 || session.active) {
+                renderTarget->FillRoundedRectangle(D2D1::RoundedRect(
+                    D2D1::RectF(startColumn-4,rowTop-2,bounds.right-10,rowTop+34),5,5),
+                    session.active ? selectionBrush.Get() : panelHoverBrush.Get());
+            }
             const std::wstring start = formatLocalTimestamp(session.interval.start);
             const std::wstring end =
                 session.active ? L"En cours"
                                : formatLocalTimestamp(session.interval.end);
             const std::wstring duration = formatDuration(session.duration);
-            drawText(start.c_str(), compactNavFormat.Get(), textBrush.Get(),
+            drawText(start.c_str(), labelFormat.Get(), textBrush.Get(),
                      D2D1::RectF(startColumn, rowTop, endColumn - 4.0f,
                                  rowTop + 19.0f));
-            drawText(end.c_str(), compactNavFormat.Get(),
+            drawText(end.c_str(), labelFormat.Get(),
                      session.active ? cyanBrush.Get() : textBrush.Get(),
                      D2D1::RectF(endColumn, rowTop, durationColumn - 4.0f,
                                  rowTop + 19.0f));
-            drawText(duration.c_str(), compactNavFormat.Get(), mutedBrush.Get(),
+            drawText(duration.c_str(), labelFormat.Get(), textBrush.Get(),
                      D2D1::RectF(durationColumn, rowTop, bounds.right - 10.0f,
-                                 rowTop + 19.0f));
+                                 rowTop + 34.0f));
         }
     }
 
@@ -1509,25 +1597,30 @@ struct DashboardWindow::Impl {
     void drawSidebar() {
         const D2D1_SIZE_F size = clientSize();
         const float width = sidebarWidth(size.width);
-        renderTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, width, size.height),
-                                    sidebarBrush.Get());
+        canvasGradient->SetStartPoint(D2D1::Point2F(width, 0));
+        canvasGradient->SetEndPoint(D2D1::Point2F(0, size.height));
+        renderTarget->FillRectangle(D2D1::RectF(0, 0, width, size.height), canvasGradient.Get());
+        renderTarget->PushAxisAlignedClip(D2D1::RectF(0,0,width,size.height), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        borderBrush->SetOpacity(.09f);
+        for (int i=0; i<18; ++i) {
+            const float y = size.height - 20 - i * 3.f;
+            renderTarget->DrawLine(D2D1::Point2F(0,y),D2D1::Point2F(width,y-width),borderBrush.Get(),1);
+        }
+        borderBrush->SetOpacity(1);
+        renderTarget->PopAxisAlignedClip();
         renderTarget->DrawLine(D2D1::Point2F(width, 0.0f),
                                D2D1::Point2F(width, size.height),
                                borderBrush.Get(), 1.0f);
 
         if (width >= 200.0f) {
-            drawText(L"CHRONOX", brandFormat.Get(), cyanBrush.Get(),
-                     D2D1::RectF(28.0f, 28.0f, width - 20.0f, 48.0f));
+            drawIcon(4, 22, 28, 28, cyanBrush.Get());
+            drawText(L"CHRONOX", navFormat.Get(), textBrush.Get(),
+                     D2D1::RectF(60, 28, width - 12, 48));
             drawText(L"SESSION TRACKER", compactNavFormat.Get(),
                      mutedBrush.Get(),
-                     D2D1::RectF(28.0f, 48.0f, width - 20.0f, 65.0f));
+                     D2D1::RectF(60, 50, width - 12, 65));
         } else {
-            const auto brandMark =
-                D2D1::RoundedRect(D2D1::RectF(17.0f, 24.0f, 55.0f, 62.0f),
-                                  10.0f, 10.0f);
-            renderTarget->FillRoundedRectangle(brandMark, accentBrush.Get());
-            drawText(L"C", titleFormat.Get(), textBrush.Get(),
-                     D2D1::RectF(17.0f, 23.0f, 55.0f, 62.0f));
+            drawIcon(4, 19, 27, 34, cyanBrush.Get());
         }
 
         const float navLeft = width >= 200.0f ? 16.0f : 8.0f;
@@ -1543,7 +1636,7 @@ struct DashboardWindow::Impl {
                                 static_cast<int>(index);
             const auto item = D2D1::RoundedRect(pageBounds[index], 10.0f, 10.0f);
             if (active) {
-                renderTarget->FillRoundedRectangle(item, panelHoverBrush.Get());
+                drawCard(pageBounds[index], true);
                 renderTarget->FillRoundedRectangle(
                     D2D1::RoundedRect(
                         D2D1::RectF(navLeft, top + 11.0f, navLeft + 3.0f,
@@ -1555,11 +1648,13 @@ struct DashboardWindow::Impl {
                 renderTarget->DrawRoundedRectangle(item, cyanBrush.Get(), 1.2f);
             }
             const float textLeft = width >= 200.0f
-                                       ? navLeft + 18.0f
+                                       ? navLeft + 46.0f
                                        : navLeft;
             const float textRight = width >= 200.0f
                                         ? navRight - 10.0f
                                         : navRight;
+            if (width >= 200) drawIcon(static_cast<int>(index), navLeft+13, top+13, 21,
+                                       active ? cyanBrush.Get() : textBrush.Get());
             const wchar_t* label =
                 width >= 200.0f ? PageLabels[index]
                                             : compactPageLabel(index);
@@ -1567,7 +1662,7 @@ struct DashboardWindow::Impl {
                      width >= 200.0f ? navFormat.Get()
                                                  : compactNavFormat.Get(),
                      active ? textBrush.Get() : mutedBrush.Get(),
-                     D2D1::RectF(textLeft, top + 5.0f, textRight,
+                     D2D1::RectF(textLeft, top + (width >= 200 ? 13.f : 5.f), textRight,
                                  top + navHeight - 5.0f));
         }
     }
@@ -1675,11 +1770,12 @@ struct DashboardWindow::Impl {
                  mutedBrush.Get(),
                  D2D1::RectF(contentLeft, 28.0f, contentRight, 48.0f));
         drawText(title, titleFormat.Get(), textBrush.Get(),
-                 D2D1::RectF(contentLeft, 57.0f, contentRight, 99.0f));
+                 D2D1::RectF(contentLeft, 54.0f, contentRight, 104.0f));
 
         const auto separator =
             D2D1::RectF(contentLeft, 112.0f, contentRight, 113.0f);
         renderTarget->FillRectangle(separator, borderBrush.Get());
+        renderTarget->FillRectangle(D2D1::RectF(contentLeft,112,contentLeft+52,114),cyanBrush.Get());
 
         const float panelTop = 142.0f;
         const float panelBottom = size.height - 32.0f;
@@ -1689,8 +1785,10 @@ struct DashboardWindow::Impl {
         const auto panel = D2D1::RoundedRect(
             D2D1::RectF(contentLeft, panelTop, contentRight, panelBottom),
             ui::space::panelRadius, ui::space::panelRadius);
-        renderTarget->FillRoundedRectangle(panel, panelBrush.Get());
-        renderTarget->DrawRoundedRectangle(panel, borderBrush.Get(), 1.0f);
+        if (activePage != DashboardPage::Overview) {
+            renderTarget->FillRoundedRectangle(panel, panelBrush.Get());
+            renderTarget->DrawRoundedRectangle(panel, borderBrush.Get(), 1.0f);
+        }
 
         const float available = std::max(1.f, panelBottom - panelTop - 20);
         const float required = activePage == DashboardPage::Overview
@@ -1808,6 +1906,9 @@ struct DashboardWindow::Impl {
         const HRESULT result = renderTarget->Resize(size);
         if (result == D2DERR_RECREATE_TARGET) {
             renderTarget.Reset();
+            metalGradient.Reset();
+            canvasGradient.Reset();
+            sessionGradient.Reset();
             backgroundBrush.Reset();
             sidebarBrush.Reset();
             panelBrush.Reset();

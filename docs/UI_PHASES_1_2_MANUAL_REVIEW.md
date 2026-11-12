@@ -37,7 +37,7 @@ Le répertoire recommandé est `build/ui-phases12/manual-captures/`. Ne pas y m�
 ## Vérifications ciblées
 
 - Valeurs principales : chiffres24–28 DIP, heures/minutes/secondes complètes, aucun « ... » ni chiffre masqué ; session principale et activité secondaire identifiables.
-- Onglets Jour/Semaine/Mois/Année : sélection lisible ; contraste des couleurs opaques testé à5,72:1. Cliquer les onglets puis les flèches précédent/suivant, DATE et Aujourd'hui.
+- Onglets Jour/Semaine/Mois/Année : sélection lisible ; contraste des couleurs opaques testé à7,64:1 après l'itération de la référence française. Cliquer les onglets puis les flèches précédent/suivant, DATE et Aujourd'hui.
 - Chaque graphique porte explicitement la mention SESSION. Ne pas interpréter sa couleur comme une mesure clavier/souris.
 - Barre latérale : comparer `-Width 819 -Height 520` et `-Width 820 -Height 520`, puis759/760. Le contenu doit rester stable sans compression brutale.
 - Paramètres : depuis le focus de navigation, Tab entre dans la checkbox, puis le délai ; le Tab suivant rejoint la navigation, puis permet d'accéder à une autre page. Maj+Tab parcourt les contrôles dans l'autre sens puis sort également. Désactiver la détection dans **le banc uniquement** : le délai est ignoré par le parcours et le clavier peut toujours sortir. Les paramètres de Chronox installé restent inchangés.

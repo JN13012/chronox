@@ -46,6 +46,11 @@ int main(int argc, char** argv) try {
     snapshot.weekDays = {5h, 4h, 6h, 3h, 7h, 0h, 2h};
     snapshot.recentSessions = {{{snapshot.capturedAt - 3'600'000'000LL,
                                   snapshot.capturedAt}, 1h, true}};
+    if (state == "reference") snapshot.activityState = ActivityState::Active;
+    for (int i = 1; state == "reference" && i < 6; ++i) {
+        const auto end = snapshot.capturedAt - i * 7'200'000'000LL;
+        snapshot.recentSessions.push_back({{end - 3'600'000'000LL, end}, 1h, false});
+    }
     DashboardWindow window([&](auto e) { error = e; }, [&] { return snapshot; },
         [&](CalendarPeriod p, Timestamp t) {
             DashboardHistorySnapshot h;
@@ -76,8 +81,14 @@ int main(int argc, char** argv) try {
     const auto dpi = GetDpiForWindow(own);
     RECT rect{0, 0, MulDiv(width, dpi, 96), MulDiv(height, dpi, 96)};
     ui::adjustClientRectForDpi(&rect, static_cast<DWORD>(GetWindowLongPtrW(own, GWL_STYLE)), FALSE, 0, dpi);
-    SetWindowPos(own, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
-                 SWP_NOMOVE | SWP_NOZORDER);
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    if (!GetMonitorInfoW(MonitorFromWindow(own, MONITOR_DEFAULTTONEAREST), &monitor))
+        throw std::runtime_error("Cannot position review on its monitor");
+    const int outerWidth = rect.right - rect.left, outerHeight = rect.bottom - rect.top;
+    const int x = monitor.rcWork.left + std::max(0L, (monitor.rcWork.right-monitor.rcWork.left-outerWidth)/2);
+    const int y = monitor.rcWork.top + std::max(0L, (monitor.rcWork.bottom-monitor.rcWork.top-outerHeight)/2);
+    if (!SetWindowPos(own, nullptr, x, y, outerWidth, outerHeight, SWP_NOZORDER))
+        throw std::runtime_error("Cannot resize review window");
     RECT client{}; GetClientRect(own, &client);
     if (client.right != MulDiv(width, dpi, 96) || client.bottom != MulDiv(height, dpi, 96))
         throw std::runtime_error("Review client size does not match requested DIPs");

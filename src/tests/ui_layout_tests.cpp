@@ -20,6 +20,8 @@ int main() try {
     }
     if (contrast(palette::text, palette::panel) < 4.5 ||
         contrast(palette::muted, palette::panel) < 4.5 ||
+        contrast(palette::text, palette::steel) < 4.5 ||
+        contrast(palette::muted, palette::steel) < 4.5 ||
         contrast(palette::text, palette::selection) < 4.5)
         throw std::runtime_error("Unreadable base palette");
     if (nextSettingsFocus(SettingsFocus::Enabled, true, true) != SettingsFocus::Navigation ||
@@ -32,7 +34,7 @@ int main() try {
     ComPtr<IDWriteFactory> factory;
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                 reinterpret_cast<IUnknown**>(factory.GetAddressOf())))) return 1;
-    for (const float width : {640.f, 720.f, 759.f, 760.f, 819.f, 820.f, 1050.f, 1370.f, 1600.f}) {
+    for (const float width : {640.f, 720.f, 759.f, 760.f, 819.f, 820.f, 1050.f, 1370.f, 1440.f, 1600.f}) {
         const auto layout = DashboardLayout{width, 520};
         const int columns = DashboardLayout::metricColumns(layout.innerWidth());
         const float card = (layout.innerWidth() - DashboardLayout::gap * (columns - 1)) / columns;
@@ -49,7 +51,9 @@ int main() try {
         checkAnnotation(coverageMessage(true),type::label,layout.innerWidth(),36);
         checkAnnotation(coverageMessage(false),type::label,layout.innerWidth(),36);
         checkAnnotation(uncertaintyMessage,type::label,layout.innerWidth(),36);
-        checkAnnotation(trackingStatus(false,L"Mesure incertaine",false),type::label,layout.innerWidth(),36);
+        checkAnnotation(trackingStatus(false,L"Mesure incertaine",false),type::label,layout.innerWidth()-38,33);
+        checkAnnotation(L"Session : lundi au dimanche",type::label,(layout.innerWidth()-DashboardLayout::gap)/2-20,17);
+        checkAnnotation(L"2562047788015215 h 30 min 7 s",type::label,(layout.innerWidth()-24)*.36f+2,34);
         checkAnnotation(L"Activit\u00e9 : 2562047788015215 h 30 min 7 s",type::activity,card-24,38);
         for (const auto* value : {L"0 h 00 min 0 s", L"1234 h 59 min 59 s",
                 L"999999 h 59 min 59 s", L"2562047788015215 h 30 min 7 s", L"Non mesur\u00e9e"}) {

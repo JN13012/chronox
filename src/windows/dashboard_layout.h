@@ -23,7 +23,7 @@ struct DashboardLayout {
                gap * (4 / metricColumns(available) - 1);
     }
     static constexpr float overviewHeight(float available) {
-        return 112 + metricsHeight(available) + gap + 154 + gap + 126;
+        return 112 + metricsHeight(available) + gap + 180 + gap + 300;
     }
     static constexpr float historyHeight = 854;
 };
