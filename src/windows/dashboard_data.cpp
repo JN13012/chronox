@@ -115,7 +115,11 @@ DashboardSnapshot queryDashboardSnapshot(
             "Dashboard weekly aggregation did not cover the calendar week");
     }
 
-    snapshot.recentSessions = queryDashboardSessionPage(database,now,trackingActive,0);
+    // The overview is a bounded local-week window. History owns older periods.
+    for (const auto& contribution : week.contributions)
+        snapshot.recentSessions.push_back({contribution.interval,asSeconds(contribution.duration),trackingActive && contribution.active});
+    std::stable_sort(snapshot.recentSessions.begin(),snapshot.recentSessions.end(),
+        [](const auto& a,const auto& b) { return a.interval.start>b.interval.start; });
     return snapshot;
 }
 

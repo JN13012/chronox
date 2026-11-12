@@ -17,10 +17,10 @@ TemporalEngine, ActivityTracker, widget, schéma SQLite et règles d'écriture r
 - Moyenne mensuelle : durée de session du mois / jours avec session positive. Sans dénominateur : tiret.
 - Activité : contributions clavier/souris V3. Non mesurée et activité mesurée nulle restent distinctes. La présence de couverture sur une portion n'atteste pas la couverture complète d'une période. Aucun taux extrapolé ni moyenne d'activité historique.
 - Frise : positions dans les intervalles UTC réels, graduations du calendrier local et conservation des règles DST.
-- Sessions : contributions selon le modèle existant, début décroissant, toutes années confondues. La session ouverte conserve En cours. Le passage de date est indiqué par (+N j) ; les heures ambiguës conservent leur décalage UTC.
+- Sessions : contributions selon le modèle existant, début décroissant. La vue générale affiche toutes les contributions de la semaine locale en cours, sans limite de 50 lignes, avec une barre de défilement interne Windows ; les périodes plus anciennes se consultent dans Historique. La session ouverte conserve En cours. Le passage de date est indiqué par (+N j) ; les heures ambiguës conservent leur décalage UTC.
 - Filtre : Du et au sont inclusifs en dates locales. Conversion en [minuit local début, minuit local après fin). Sessions en intersection ; durées et bornes limitées à cette plage. Les cartes et graphiques de l'Historique suivent les mêmes bornes. Les graphiques de plages longues regroupent au plus environ 32 fenêtres locales ; chaque groupe somme les contributions.
 - Les boutons jour/semaine/mois/année sont conservés. Les flèches de navigation et le calendrier sortent du filtre. Réinitialiser rétablit la période courante de navigation. Cliquer un groupe filtré affine le filtre à ce groupe.
-- Pages de 50 lignes : chargement borné, offset recalculé sur les données courantes. Une nouvelle session peut déplacer les pages pendant la consultation. Les agrégats de période réutilisent l'API existante, qui lit les contributions de toute la période.
+- Dans Historique, pages de 50 lignes : chargement borné, offset recalculé sur les données courantes. Une nouvelle session peut déplacer les pages pendant la consultation. Les agrégats de période réutilisent l'API existante, qui lit les contributions de toute la période.
 
 ## Commandes de revue manuelle
 
@@ -36,15 +36,16 @@ ctest --test-dir build -C Release --output-on-failure
 ./scripts/review-dashboard.ps1 -Page History -Width 720 -Height 520 -State reference
 ```
 
-Le banc est autonome : données fictives, aucun moteur, aucune base réelle, aucun registre. Il contient 125 lignes réparties sur plusieurs dates. Tester aussi -State missing, zero, uncertain et disabled. Maximiser manuellement le banc ; vérifier textes, boutons, sept valeurs et frise. À 720 × 520, utiliser le défilement du dashboard pour atteindre les sessions, puis la molette dans la liste pour déplacer seulement ses lignes ; les en-têtes restent fixes dans la liste.
+Le banc est autonome : données fictives, aucun moteur, aucune base réelle, aucun registre. Il contient 125 lignes fictives réparties sur plusieurs dates de la même semaine. Tester aussi -State missing, zero, uncertain et disabled. Maximiser manuellement le banc ; vérifier textes, boutons, sept valeurs et frise. À 720 × 520, utiliser le défilement du dashboard pour atteindre les sessions, puis la molette dans la liste pour déplacer seulement ses lignes ; les en-têtes restent fixes dans la liste.
 
 - F1 ou clic sur l'état : définitions et limites de couverture.
 - F2 ou clic dans l'histogramme : les sept durées exactes, secondes comprises.
 - F4 ou Voir tout l'historique : Historique.
 - Tab dans Historique : sélection des dates, Appliquer, Réinitialiser ; Entrée active l'action. Les dates ne s'appliquent qu'avec Appliquer.
-- Ctrl+Page suivante/précédente ou boutons de page : autre fenêtre de 50 sessions.
+- Vue générale : molette ou barre verticale dans Dernières sessions ; F6 donne le focus à cette barre, puis flèches et Page précédente/suivante. Tab ou Échap rend le focus au dashboard.
+- Historique : Ctrl+Page suivante/précédente ou boutons de page pour une autre fenêtre de 50 sessions.
 - Glisser sur le texte puis Ctrl+C : sélection ; Ctrl+A sélectionne les textes chargés de la page visible.
-- Menu contextuel : copier sélection, ligne, durée ou lignes de la page. F3 copie les lignes chargées (50 maximum) en texte avec tabulations et en-tête. Le clic droit doit viser la ligne pour la copie d'une ligne/durée.
+- Menu contextuel : copier sélection, ligne, durée ou lignes de la page. F3 copie les lignes chargées (toute la semaine dans la vue générale, 50 maximum dans Historique) en texte avec tabulations et en-tête. Le clic droit doit viser la ligne pour la copie d'une ligne/durée.
 
 ## Validation
 
@@ -75,3 +76,11 @@ NON TESTÉ : absence de texte tronqué ou chevauché en inspection visuelle, cop
 Les mesures de ressources sont celles du banc fictif, sans garantie sur une longue session de production ou une base de grande taille. Les durées de lecture des agrégats existants sur une très grande plage n'ont pas été profilées.
 
 Verdict visuel : NON CONCLUANT, en attente de validation utilisateur. Ne pas commencer D sans nouvelle autorisation.
+
+## Correction ciblée — Dernières sessions
+
+Le titre dispose désormais de 26 DIP de hauteur, sans changer sa police ni son alignement. Le tableau de la vue générale affiche uniquement les contributions de la semaine locale (lundi à dimanche), toutes accessibles avec une barre Windows indépendante et la molette. Les en-têtes restent fixes dans cette liste. Les périodes plus anciennes restent dans Historique. Aucun ajout de requête SQLite : les contributions hebdomadaires déjà lues sont réutilisées.
+
+Validation : build Release PASS ; 27/27 CTest PASS (13,66 s). Régressions : 80 sessions hebdomadaires sans limite de 50, exclusion de la semaine précédente, découpage à la frontière du lundi, métriques DirectWrite du titre. Banc fictif avec 125 lignes : défilement jusqu'à la dernière ligne puis retour en haut sans déplacement du dashboard, PASS à 1050 × 700 et 720 × 520 ; filtre inclusif et cache de dessin toujours PASS.
+
+L'installation officielle et son processus observé pendant cette correction n'ont pas été remplacés ni arrêtés. Capture Windows toujours indisponible ; inspection visuelle du résultat à confirmer dans le banc.

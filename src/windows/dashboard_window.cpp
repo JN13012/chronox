@@ -419,7 +419,7 @@ struct DashboardWindow::Impl {
             loadHistory(true);
         } else {
             snapshot = snapshotProvider();
-            if(recentPageOffset) loadSessionPage(false);
+
         }
         render();
     }
@@ -497,7 +497,7 @@ struct DashboardWindow::Impl {
                           2;
         window = CreateWindowExW(
             0, DashboardClassName, L"Chronox - Tableau de bord",
-            WS_OVERLAPPEDWINDOW | WS_VSCROLL, x, y, width, height, nullptr, nullptr,
+            WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_CLIPCHILDREN, x, y, width, height, nullptr, nullptr,
             GetModuleHandleW(nullptr), this);
         if (window == nullptr) {
             throw windowsError("CreateWindowExW(dashboard)", GetLastError());
@@ -511,6 +511,10 @@ struct DashboardWindow::Impl {
             throw windowsError("CreateWindowExW(history calendar)", GetLastError());
         }
 
+        recentScrollbar=CreateWindowExW(0,L"SCROLLBAR",L"Sessions de la semaine",WS_CHILD|WS_TABSTOP|SBS_VERT,
+            0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(RecentScrollbarId)),GetModuleHandleW(nullptr),nullptr);
+        if(!recentScrollbar || !SetWindowSubclass(recentScrollbar,recentScrollbarProcedure,3,reinterpret_cast<DWORD_PTR>(this)))
+            throw windowsError("Create recent sessions scrollbar",GetLastError());
         dpi = GetDpiForWindow(window);
         if (dpi == 0) {
             throw windowsError("GetDpiForWindow(dashboard)", GetLastError());
@@ -994,13 +998,61 @@ struct DashboardWindow::Impl {
         }
     }
 
-    std::size_t recentScrollOffset{}, recentPageOffset{}, historyPageOffset{};
+    std::size_t recentScrollOffset{}, historyPageOffset{};
+    HWND recentScrollbar{};
+    std::size_t recentVisibleRows{},recentMaximumOffset{};
+    RECT recentScrollbarRect{};
+    bool recentScrollbarVisible{};
+    static constexpr int RecentScrollbarId=3301;
+    static constexpr float SessionRowsTop=57;
     std::vector<DashboardSession> historyRows;
     std::optional<TimeRange> historyFilter;
     DashboardHistorySnapshot filteredHistory;
     D2D1_RECT_F tableBounds{};
     struct TableAction { D2D1_RECT_F bounds; int action; };
     std::vector<TableAction> tableActions;
+
+    void hideRecentScrollbar() {
+        if(recentScrollbarVisible) { ShowWindow(recentScrollbar,SW_HIDE); recentScrollbarVisible=false; }
+    }
+    void layoutRecentScrollbar(D2D1_RECT_F bounds,float top,float bottom,std::size_t visible) {
+        recentVisibleRows=visible;
+        recentMaximumOffset=snapshot.recentSessions.size()>visible?snapshot.recentSessions.size()-visible:0;
+        const float y=std::max(textClip.top,top-contentScroll[0]);
+        const float end=std::min(textClip.bottom,bottom-contentScroll[0]);
+        if(!recentScrollbar || !recentMaximumOffset || !visible || end-y<20) { hideRecentScrollbar(); return; }
+        RECT rect{static_cast<LONG>(std::lround((bounds.right-20)*dpi/96)),static_cast<LONG>(std::lround(y*dpi/96)),
+            static_cast<LONG>(std::lround((bounds.right-4)*dpi/96)),static_cast<LONG>(std::lround(end*dpi/96))};
+        if(!EqualRect(&rect,&recentScrollbarRect)) {
+            SetWindowPos(recentScrollbar,nullptr,rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,SWP_NOZORDER|SWP_NOACTIVATE);
+            recentScrollbarRect=rect;
+        }
+        SCROLLINFO info{sizeof(SCROLLINFO),SIF_RANGE|SIF_PAGE|SIF_POS};
+        info.nMax=static_cast<int>(snapshot.recentSessions.size())-1; info.nPage=static_cast<UINT>(visible); info.nPos=static_cast<int>(recentScrollOffset);
+        SCROLLINFO old{sizeof(SCROLLINFO),SIF_RANGE|SIF_PAGE|SIF_POS}; GetScrollInfo(recentScrollbar,SB_CTL,&old);
+        if(old.nMax!=info.nMax || old.nPage!=info.nPage || old.nPos!=info.nPos) SetScrollInfo(recentScrollbar,SB_CTL,&info,TRUE);
+        if(!recentScrollbarVisible) { ShowWindow(recentScrollbar,SW_SHOWNA); recentScrollbarVisible=true; }
+    }
+    void scrollRecentSessions(int action) {
+        auto position=static_cast<int>(recentScrollOffset);
+        const auto page=static_cast<int>(std::max<std::size_t>(1,recentVisibleRows));
+        if(action==SB_THUMBTRACK || action==SB_THUMBPOSITION) {
+            SCROLLINFO info{sizeof(SCROLLINFO),SIF_TRACKPOS}; GetScrollInfo(recentScrollbar,SB_CTL,&info); position=info.nTrackPos;
+        } else if(action==SB_TOP) position=0;
+        else if(action==SB_BOTTOM) position=static_cast<int>(recentMaximumOffset);
+        else if(action==SB_LINEUP) --position;
+        else if(action==SB_LINEDOWN) ++position;
+        else if(action==SB_PAGEUP) position-=page;
+        else if(action==SB_PAGEDOWN) position+=page;
+        else return;
+        recentScrollOffset=static_cast<std::size_t>(std::clamp(position,0,static_cast<int>(recentMaximumOffset)));
+        cancelTextSelection(); render();
+    }
+    static LRESULT CALLBACK recentScrollbarProcedure(HWND control,UINT message,WPARAM wParam,LPARAM lParam,UINT_PTR,DWORD_PTR data) {
+        auto* self=reinterpret_cast<Impl*>(data);
+        if(message==WM_KEYDOWN && (wParam==VK_TAB || wParam==VK_ESCAPE)) { SetFocus(self->window); return 0; }
+        return DefSubclassProc(control,message,wParam,lParam);
+    }
 
     int tableActionAt(float x,float y) const {
         if (activePage==DashboardPage::Settings || y<126 || y>=clientSize().height-32) return -1;
@@ -1011,7 +1063,7 @@ struct DashboardWindow::Impl {
     void loadSessionPage(bool history) {
         if (!reads.sessions) return;
         if(history) historyRows=reads.sessions(historyPageOffset,historyFilter ? historyFilter : std::optional<TimeRange>(activeHistory->range));
-        else snapshot.recentSessions=reads.sessions(recentPageOffset,std::nullopt);
+
     }
     std::wstring sessionTimes(const DashboardSession& session) const {
         std::wstring end=session.active ? L"En cours" : formatHistoryTime(session.interval.end);
@@ -1027,15 +1079,16 @@ struct DashboardWindow::Impl {
         tableBounds=bounds; tableActions.clear();
         const auto& rows=history?historyRows:snapshot.recentSessions;
         auto& offset=history?sessionScrollOffset:recentScrollOffset;
-        const float left=bounds.left+12, right=bounds.right-12, width=right-left;
+        const float left=bounds.left+12, right=bounds.right-(history?12:30), width=right-left;
         const float timeLeft=left+width*.25f, durationLeft=left+width*.68f;
-        drawText(history?L"Sessions de la période (portions incluses)":L"Dernières sessions",labelFormat.Get(),textBrush.Get(),D2D1::RectF(left,bounds.top+7,right,bounds.top+25));
-        const float header=bounds.top+30, top=header+21, bottom=bounds.bottom-32;
+        drawText(history?L"Sessions de la période (portions incluses)":L"Dernières sessions",labelFormat.Get(),textBrush.Get(),D2D1::RectF(left,bounds.top+7,right,bounds.top+33));
+        const float header=bounds.top+36, top=bounds.top+SessionRowsTop, bottom=bounds.bottom-32;
         drawText(L"Date",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(left,header,timeLeft-4,header+18));
         drawText(L"Début – Fin",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(timeLeft,header,durationLeft-4,header+18));
         drawText(L"Durée",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(durationLeft,header,right,header+18));
         const auto visible=static_cast<std::size_t>(std::max(0.f,std::floor((bottom-top)/32)));
         offset=std::min(offset,rows.size()>visible?rows.size()-visible:0);
+        if(!history) layoutRecentScrollbar(bounds,top,bottom,visible);
         for(std::size_t i=0;i<visible && offset+i<rows.size();++i) {
             const auto& s=rows[offset+i]; const float y=top+i*32;
             if(i%2==0 || s.active) renderTarget->FillRectangle(D2D1::RectF(left-4,y,right+4,y+31),s.active?selectionBrush.Get():panelHoverBrush.Get());
@@ -1049,18 +1102,24 @@ struct DashboardWindow::Impl {
             const auto rect=D2D1::RectF(x,footer,x+w,bounds.bottom-5);
             drawText(text,compactNavFormat.Get(),cyanBrush.Get(),rect); tableActions.push_back({rect,action});
         };
-        button(L"← Page",left,68,0); button(L"Page →",left+72,68,1);
-        const auto pageLabel=L"Page "+std::to_wstring((history?historyPageOffset:recentPageOffset)/50+1)+L" · "+std::to_wstring(rows.size())+L" lignes";
-        drawText(pageLabel.c_str(),compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(left+145,footer,right-164,bounds.bottom-5));
-        if(!history) button(L"Voir tout l'historique",right-160,160,2);
-        else drawText(L"Copier la page : F3",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(right-160,footer,right,bounds.bottom-5));
+        if(!history) {
+            const auto label=L"Cette semaine · "+std::to_wstring(rows.size())+L" sessions";
+            drawText(label.c_str(),compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(left,footer,bounds.right-180,bounds.bottom-5));
+            button(L"Voir tout l'historique",bounds.right-172,160,2);
+        } else {
+            button(L"← Page",left,68,0); button(L"Page →",left+72,68,1);
+            const auto label=L"Page "+std::to_wstring(historyPageOffset/50+1)+L" · "+std::to_wstring(rows.size())+L" lignes";
+            drawText(label.c_str(),compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(left+145,footer,right-164,bounds.bottom-5));
+            drawText(L"Copier la page : F3",compactNavFormat.Get(),mutedBrush.Get(),D2D1::RectF(right-160,footer,right,bounds.bottom-5));
+        }
     }
     void drawRecentSessions(D2D1_RECT_F bounds) { drawSessionTable(bounds,false); }
     void applyTableAction(int action) {
         if(action==2) { selectPage(1); return; }
-        const bool history=activePage==DashboardPage::History;
-        auto& offset=history?historyPageOffset:recentPageOffset;
-        const auto count=history?historyRows.size():snapshot.recentSessions.size();
+        if(activePage!=DashboardPage::History) return;
+        const bool history=true;
+        auto& offset=historyPageOffset;
+        const auto count=historyRows.size();
         if(action==0) offset=offset>=50?offset-50:0;
         else if(count==50) offset+=50;
         loadSessionPage(history); sessionScrollOffset=recentScrollOffset=0; cancelTextSelection(); render();
@@ -1084,10 +1143,10 @@ struct DashboardWindow::Impl {
         const auto& rows=activePage==DashboardPage::History?historyRows:snapshot.recentSessions;
         const auto offset=activePage==DashboardPage::History?sessionScrollOffset:recentScrollOffset;
         std::size_t row=offset;
-        if(!keyboard && y>=tableBounds.top+51 && y<tableBounds.bottom-32)
-            row+=static_cast<std::size_t>((y-tableBounds.top-51)/32);
+        if(!keyboard && y>=tableBounds.top+SessionRowsTop && y<tableBounds.bottom-32)
+            row+=static_cast<std::size_t>((y-tableBounds.top-SessionRowsTop)/32);
         const bool inTable=activePage!=DashboardPage::Settings && (keyboard ||
-            (local.x*96.f/dpi>=tableBounds.left && local.x*96.f/dpi<tableBounds.right && y>=tableBounds.top+51 && y<tableBounds.bottom-32));
+            (local.x*96.f/dpi>=tableBounds.left && local.x*96.f/dpi<tableBounds.right && y>=tableBounds.top+SessionRowsTop && y<tableBounds.bottom-32));
         HMENU menu=CreatePopupMenu(); if(!menu) return;
         AppendMenuW(menu,MF_STRING|(textSelection.hasSelection()?0:MF_GRAYED),1,L"Copier la sélection\tCtrl+C");
         AppendMenuW(menu,MF_STRING|(inTable && row<rows.size()?0:MF_GRAYED),2,L"Copier la ligne");
@@ -1874,6 +1933,7 @@ struct DashboardWindow::Impl {
 
     void drawContent() {
         const D2D1_SIZE_F size = clientSize();
+        if(activePage!=DashboardPage::Overview) hideRecentScrollbar();
         const float left = sidebarWidth(size.width);
         const float padding = ui::DashboardLayout{size.width, size.height}.padding();
         const float contentLeft = left + padding;
@@ -1982,7 +2042,7 @@ struct DashboardWindow::Impl {
             loadHistory(false);
         } else if (activePage == DashboardPage::Overview) {
             snapshot = snapshotProvider();
-            recentPageOffset=recentScrollOffset=0;
+            recentScrollOffset=0;
         }
         render();
     }
@@ -2247,6 +2307,7 @@ struct DashboardWindow::Impl {
         }
         case WM_VSCROLL: {
             const int action = LOWORD(wParam);
+            if(reinterpret_cast<HWND>(lParam)==recentScrollbar && recentScrollbar) { scrollRecentSessions(action); return 0; }
             if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) {
                 SCROLLINFO info{sizeof(SCROLLINFO), SIF_TRACKPOS};
                 GetScrollInfo(hwnd, SB_VERT, &info);
@@ -2264,7 +2325,7 @@ struct DashboardWindow::Impl {
             POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             ScreenToClient(hwnd, &point);
             const float y = point.y * 96.f / dpi;
-            if(activePage==DashboardPage::Overview && y+contentScroll[0]>=tableBounds.top+51 && y+contentScroll[0]<tableBounds.bottom-32) {
+            if(activePage==DashboardPage::Overview && point.x*96.f/dpi>=tableBounds.left && point.x*96.f/dpi<tableBounds.right && y>=126 && y<clientSize().height-32 && y+contentScroll[0]>=tableBounds.top+SessionRowsTop && y+contentScroll[0]<tableBounds.bottom-32) {
                 if(GET_WHEEL_DELTA_WPARAM(wParam)<0) recentScrollOffset+=3; else recentScrollOffset=recentScrollOffset>3?recentScrollOffset-3:0;
                 cancelTextSelection(); render(); return 0;
             }
@@ -2293,6 +2354,7 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_KEYDOWN:
+            if (wParam==VK_F6 && activePage==DashboardPage::Overview && recentScrollbarVisible) { SetFocus(recentScrollbar); return 0; }
             if (wParam == VK_F1) { showMetricDefinitions(); return 0; }
             if (wParam == VK_F2 && activePage==DashboardPage::Overview) { showWeekDetails(); return 0; }
             if (wParam==VK_F4) { selectPage(1); return 0; }

@@ -154,8 +154,8 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
                 snapshot.weekDays[4] == 30min &&
                 snapshot.weekDays[5] == 150min,
             "weekly bars split intervals across the correct Monday-first days");
-    require(snapshot.recentSessions.size() == 8,
-            "recent history includes prior years in descending order");
+    require(snapshot.recentSessions.size() == 6,
+            "overview includes only the current local week in descending order");
     require(snapshot.recentSessions.front().active,
             "the latest session is identified as active");
     require(snapshot.recentSessions.front().interval.start == activeStart &&
@@ -166,9 +166,9 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
                 snapshot.recentSessions[1].duration == 90min,
             "the active session duration and previous closed session are distinct");
     require(snapshot.recentSessions[5].interval.start ==
-                localTime(2024, 6, 9, 23, 30) &&
-                snapshot.recentSessions[5].duration == 1h,
-            "recent session rows retain full starts and durations across Monday");
+                localTime(2024, 6, 10, 0) &&
+                snapshot.recentSessions[5].duration == 30min,
+            "a session crossing Monday includes only its weekly contribution");
     require(database.latestRecordedTimestamp() == latestRecordedBeforeQuery,
             "building the overview does not write SQLite data");
 }
@@ -366,6 +366,18 @@ void measuredOverlapsUseExplicitDurationAndActiveIdentity() {
         "active identity survives civil rollback");
 }
 
+void overviewWeekHasNoFiftyRowLimit() {
+    TemporaryDatabase file;
+    SessionDatabase database(file.path());
+    const auto monday=localTime(2024,6,10,8);
+    recordInterval(database,localTime(2024,6,9,10),localTime(2024,6,9,11));
+    for(int i=0;i<80;++i) recordInterval(database,monday+durationTicks(std::chrono::minutes(i*2)),monday+durationTicks(std::chrono::minutes(i*2)+1min));
+    const auto overview=chronox::queryDashboardSnapshot(database,localTime(2024,6,12,12),false);
+    require(overview.recentSessions.size()==80,"overview retains every session in its week beyond fifty rows");
+    require(overview.recentSessions.back().interval.start==monday,"prior-week sessions stay in history");
+    require(overview.recentSessions.front().interval.start==monday+durationTicks(158min),"weekly sessions remain newest first");
+}
+
 void boundedPagesAndInclusiveRange() {
     TemporaryDatabase file;
     SessionDatabase database(file.path());
@@ -391,6 +403,7 @@ void boundedPagesAndInclusiveRange() {
 } // namespace
 
 int main() {
+    overviewWeekHasNoFiftyRowLimit();
     boundedPagesAndInclusiveRange();
     measuredOverlapsUseExplicitDurationAndActiveIdentity();
     emptyDatabaseProducesEmptyOverview();

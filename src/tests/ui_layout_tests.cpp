@@ -40,6 +40,10 @@ int main() try {
         const auto require=[](bool ok,const char* message) { if(!ok) throw std::runtime_error(message); };
         ComPtr<IDWriteTextFormat> format;
         require(SUCCEEDED(createTextFormat(factory.Get(),type::label,&format)),"Selection format");
+        ComPtr<IDWriteTextLayout> sessionHeading;
+        require(SUCCEEDED(factory->CreateTextLayout(L"Dernières sessions",18,format.Get(),300,26,&sessionHeading)),"Session heading layout");
+        DWRITE_TEXT_METRICS headingMetrics{};
+        require(SUCCEEDED(sessionHeading->GetMetrics(&headingMetrics)) && headingMetrics.height<=26,"Session heading glyphs fit without bottom clipping");
         DashboardTextSelection selection;
         const D2D1_RECT_F clip{0,0,500,200};
         selection.beginFrame();

@@ -28,7 +28,7 @@ int main(int argc, char** argv) try {
     std::exception_ptr error;
     ActivitySettings settings;
     DashboardSnapshot snapshot;
-    snapshot.capturedAt = 1'794'225'600'000'000;
+    snapshot.capturedAt = 1'794'484'800'000'000;
     snapshot.todayRange = calendarPeriodContaining(snapshot.capturedAt, CalendarPeriod::Day);
     snapshot.todayDuration = 5h + 27min + 15s;
     snapshot.weekDuration = 28h + 16min;
@@ -51,11 +51,18 @@ int main(int argc, char** argv) try {
     if (state == "reference") snapshot.activityState = ActivityState::Active;
     snapshot.daysWithSession={1,5,19,210}; snapshot.monthDailyAverage=7h+6min;
     for (int i = 1; i < 125; ++i) {
-        const auto end = snapshot.capturedAt - i * 86'400'000'000LL;
+        const auto end = snapshot.capturedAt - i * 1'200'000'000LL;
         snapshot.recentSessions.push_back({{end - 3'600'000'000LL, end}, 1h, false});
     }
     const auto allSessions=snapshot.recentSessions;
-    snapshot.recentSessions.resize(std::min<std::size_t>(50,snapshot.recentSessions.size()));
+    const auto weekRange=calendarPeriodContaining(snapshot.capturedAt,CalendarPeriod::Week);
+    snapshot.recentSessions.clear();
+    for(auto session:allSessions) {
+        const auto start=std::max(session.interval.start,weekRange.start), end=std::min(session.interval.end,weekRange.end);
+        if(end<=start) continue;
+        session.interval={start,end}; session.duration=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::microseconds(end-start));
+        snapshot.recentSessions.push_back(session);
+    }
     int rangeReads=0,pageReads=0;
     std::optional<TimeRange> lastRange;
     const auto historyProvider = [&](CalendarPeriod p, Timestamp t) {
@@ -154,6 +161,21 @@ int main(int argc, char** argv) try {
         while (IsWindowVisible(own)) { pump(); std::this_thread::sleep_for(10ms); }
     } else {
         // Test only this fixture's own native controls; no production data or settings.
+        select(0); pump();
+        SendMessageW(own,WM_VSCROLL,SB_BOTTOM,0); pump();
+        const auto listScroll=GetDlgItem(own,3301);
+        SCROLLINFO listInfo{sizeof(SCROLLINFO),SIF_ALL},mainInfo{sizeof(SCROLLINFO),SIF_POS};
+        if(!listScroll || !IsWindowVisible(listScroll) || !GetScrollInfo(listScroll,SB_CTL,&listInfo) || listInfo.nMax<50)
+            throw std::runtime_error("Weekly scrollbar is missing or sessions are truncated");
+        GetScrollInfo(own,SB_VERT,&mainInfo); const auto mainPosition=mainInfo.nPos;
+        SendMessageW(own,WM_VSCROLL,SB_BOTTOM,reinterpret_cast<LPARAM>(listScroll)); pump();
+        GetScrollInfo(listScroll,SB_CTL,&listInfo); GetScrollInfo(own,SB_VERT,&mainInfo);
+        if(listInfo.nPos!=listInfo.nMax-static_cast<int>(listInfo.nPage)+1 || mainInfo.nPos!=mainPosition)
+            throw std::runtime_error("Weekly scrollbar must reach the final row without scrolling the dashboard");
+        SendMessageW(own,WM_VSCROLL,SB_TOP,reinterpret_cast<LPARAM>(listScroll)); pump();
+        GetScrollInfo(listScroll,SB_CTL,&listInfo);
+        if(listInfo.nPos!=0) throw std::runtime_error("Weekly scrollbar did not return to first row");
+        std::cout << "All weekly rows and independent native scrollbar: PASS\n";
         select(1); pump();
         SYSTEMTIME first{},last{};
         const auto localDate=[](Timestamp timestamp) {
