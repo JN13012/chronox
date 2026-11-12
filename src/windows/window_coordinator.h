@@ -17,7 +17,7 @@ public:
                       SnapshotProvider snapshotProvider,
                       HistoryProvider historyProvider,
                       DashboardWindow::SettingsProvider settingsProvider = {},
-                      DashboardWindow::SettingsHandler settingsHandler = {});
+                      DashboardWindow::SettingsHandler settingsHandler = {}, DashboardReadProviders reads = {});
     ~WindowCoordinator();
 
     WindowCoordinator(const WindowCoordinator&) = delete;
@@ -32,6 +32,7 @@ private:
     HistoryProvider historyProvider_{};
     DashboardWindow::SettingsProvider settingsProvider_;
     DashboardWindow::SettingsHandler settingsHandler_;
+    DashboardReadProviders reads_;
     std::unique_ptr<DashboardWindow> dashboard_;
 };
 

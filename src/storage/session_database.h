@@ -53,6 +53,7 @@ public:
     // Commits pending boundaries atomically; otherwise refreshes RAM only.
     void updateTemporal(TemporalEngine& engine, bool durable, ActivityTracker* activity = nullptr);
     ActivityReport queryActivity(CalendarPeriod period, Timestamp anchor, const CalendarTimeConverter* converter = nullptr) const;
+    ActivityReport queryActivity(TimeRange range) const;
     Timestamp uncertaintyCount() const;
     Timestamp activityUncertaintyCount() const;
     void backupTo(const std::filesystem::path& destination) const;
@@ -69,13 +70,15 @@ public:
                                Timestamp now,
                                const CalendarTimeConverter& converter) const;
 
+    // Read-only, bounded rows across all years; stable ordering within one snapshot.
+    std::vector<SessionContribution> querySessionPage(Timestamp now, std::size_t offset,
+        std::size_t limit = 50, std::optional<TimeRange> range = std::nullopt) const;
+    HistoryReport queryHistory(TimeRange range, CalendarPeriod period, Timestamp now,
+        const CalendarTimeConverter* converter = nullptr) const;
+
 private:
     HistoryReport queryMeasuredHistory(TimeRange, CalendarPeriod, const CalendarTimeConverter*) const;
     std::chrono::microseconds legacyDuration(TimeRange range, Timestamp now) const;
-    HistoryReport queryHistory(TimeRange range,
-                               CalendarPeriod period,
-                               Timestamp now,
-                               const CalendarTimeConverter* converter) const;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -115,30 +115,15 @@ DashboardSnapshot queryDashboardSnapshot(
             "Dashboard weekly aggregation did not cover the calendar week");
     }
 
-    constexpr std::size_t RecentSessionLimit = 8;
-    const std::size_t firstRecent =
-        year.sessionIntervals.size() > RecentSessionLimit
-            ? year.sessionIntervals.size() - RecentSessionLimit
-            : 0;
-    snapshot.recentSessions.reserve(year.sessionIntervals.size() - firstRecent);
-    for (std::size_t index = year.sessionIntervals.size();
-         index > firstRecent; --index) {
-        const TimeRange interval = year.sessionIntervals[index - 1];
-        const auto& contribution = year.contributions[index - 1];
-        const bool active = trackingActive && contribution.active;
-        snapshot.recentSessions.push_back(
-            {interval,
-             asSeconds(contribution.duration),
-             active});
-    }
+    snapshot.recentSessions = queryDashboardSessionPage(database,now,trackingActive,0);
     return snapshot;
 }
 
 DashboardHistorySnapshot queryDashboardHistory(
     const SessionDatabase& database, CalendarPeriod period, Timestamp anchor,
     Timestamp now, bool trackingActive,
-    const CalendarTimeConverter* converter) {
-    const HistoryReport report =
+    const CalendarTimeConverter* converter, std::optional<TimeRange> filter) {
+    const HistoryReport report = filter ? database.queryHistory(*filter,period,now,converter) :
         converter == nullptr
             ? database.queryHistory(period, anchor, now)
             : database.queryHistory(period, anchor, now, *converter);
@@ -148,8 +133,9 @@ DashboardHistorySnapshot queryDashboardHistory(
     snapshot.range = report.range;
     snapshot.capturedAt = now;
     snapshot.duration = asSeconds(report.sessionDuration);
-    const auto activity=database.queryActivity(period,anchor,converter);
+    const auto activity=filter ? database.queryActivity(*filter) : database.queryActivity(period,anchor,converter);
     snapshot.activityDuration=asSeconds(activity.duration); snapshot.activityMeasured=activity.measured;
+
     snapshot.daysWithActivity = report.daysWithDuration;
     snapshot.trackingActive = trackingActive;
     snapshot.timeUncertain = database.uncertaintyCount()!=0 || database.activityUncertaintyCount()!=0;
@@ -173,6 +159,10 @@ DashboardHistorySnapshot queryDashboardHistory(
                                ? calendarPeriodContaining(bucketStart, bucketPeriod)
                                : calendarPeriodContaining(bucketStart, bucketPeriod,
                                                           *converter);
+        if(filter) {
+            const int stride=std::max(1,static_cast<int>((filter->end-filter->start)/86'400'000'000LL/31)+1);
+            bucket.end=dayContaining(shiftCalendarPeriod(bucketStart,CalendarPeriod::Day,stride,converter),converter).start;
+        }
         bucket.start = bucketStart;
         bucket.end = std::min(bucket.end, report.range.end);
         std::chrono::microseconds duration{};
@@ -185,6 +175,14 @@ DashboardHistorySnapshot queryDashboardHistory(
         bucketStart = bucket.end;
     }
     return snapshot;
+}
+
+std::vector<DashboardSession> queryDashboardSessionPage(const SessionDatabase& database,
+    Timestamp now, bool trackingActive, std::size_t offset, std::optional<TimeRange> filter) {
+    std::vector<DashboardSession> rows;
+    for(const auto& c:database.querySessionPage(now,offset,50,filter))
+        rows.push_back({c.interval,asSeconds(c.duration),trackingActive && c.active});
+    return rows;
 }
 
 Timestamp shiftCalendarPeriod(Timestamp anchor, CalendarPeriod period, int delta,

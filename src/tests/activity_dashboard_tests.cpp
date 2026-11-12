@@ -8,8 +8,9 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string_view>
+#include <source_location>
 using namespace chronox;
-void check(bool x) { if(!x) throw std::runtime_error("Activity dashboard invariant failed"); }
+void check(bool x, std::source_location at=std::source_location::current()) { if(!x) throw std::runtime_error("Activity dashboard invariant failed at line "+std::to_string(at.line())); }
 int main() try {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);

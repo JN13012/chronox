@@ -60,6 +60,10 @@ void calendarTests(const std::filesystem::path& root) {
         check(db.queryActivity(period,boundary-1,&converter).duration.count()==1'000'001);
         check(db.queryActivity(period,boundary,&converter).duration.count()==2'000'003);
     }
+    const auto filteredActivity=db.queryActivity(TimeRange{boundary,boundary+1'000'000});
+    check(filteredActivity.measured && filteredActivity.duration.count()==1'000'000);
+    check(!db.queryActivity(TimeRange{boundary-20*S,boundary-10*S}).measured);
+    check(!db.queryActivity(TimeRange{boundary+2'000'003,boundary+3'000'003}).measured); // touching coverage is not an overlap
     // A UTC correction overlaps civil timestamps but never monotone durations.
     auto before=e.snapshot(); auto civil=e.current()->utcEnd;
     e.observe({boundary-60*S,d+S,d+S}); a.advance(before,e.snapshot(),civil,{4000,0,true}); db.updateTemporal(e,true,&a);

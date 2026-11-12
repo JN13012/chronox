@@ -154,8 +154,8 @@ void periodsSessionsAndCrossMidnightAreAggregatedFromHistory() {
                 snapshot.weekDays[4] == 30min &&
                 snapshot.weekDays[5] == 150min,
             "weekly bars split intervals across the correct Monday-first days");
-    require(snapshot.recentSessions.size() == 7,
-            "recent history includes the latest sessions from the current year");
+    require(snapshot.recentSessions.size() == 8,
+            "recent history includes prior years in descending order");
     require(snapshot.recentSessions.front().active,
             "the latest session is identified as active");
     require(snapshot.recentSessions.front().interval.start == activeStart &&
@@ -358,13 +358,40 @@ void measuredOverlapsUseExplicitDurationAndActiveIdentity() {
     const auto history=chronox::queryDashboardHistory(db,CalendarPeriod::Day,start,e.snapshot().utc,true);
     require(snapshot.todayDuration==20min && history.duration==20min && history.buckets.front().duration==20min,
         "overlapping civil epochs preserve measured contributions in every view");
+    const auto page=chronox::queryDashboardSessionPage(db,e.snapshot().utc,true,0);
+    require(page.size()==2 && page[0].duration+page[1].duration==20min,"paged reads retain explicit duration across overlapping civil epochs");
+    const auto filtered=chronox::queryDashboardHistory(db,CalendarPeriod::Day,start,e.snapshot().utc,true,nullptr,chronox::TimeRange{start,start+durationTicks(15min)});
+    require(filtered.duration==20min,"range reads preserve overlapping measured contributions");
     require(snapshot.recentSessions.front().active && snapshot.recentSessions.front().duration==10min,
         "active identity survives civil rollback");
+}
+
+void boundedPagesAndInclusiveRange() {
+    TemporaryDatabase file;
+    SessionDatabase database(file.path());
+    const auto base=localTime(2023,12,1,12);
+    for(int i=0;i<125;++i) recordInterval(database,base+durationTicks(std::chrono::hours(i*24)),base+durationTicks(std::chrono::hours(i*24)+1h));
+    const auto now=base+durationTicks(std::chrono::hours(126*24));
+    const auto before=database.latestRecordedTimestamp();
+    const auto first=chronox::queryDashboardSessionPage(database,now,false,0);
+    const auto second=chronox::queryDashboardSessionPage(database,now,false,50);
+    const auto third=chronox::queryDashboardSessionPage(database,now,false,100);
+    require(first.size()==50 && second.size()==50 && third.size()==25,"bounded pages include all years");
+    require(first.back().interval.start>second.front().interval.start && second.back().interval.start>third.front().interval.start,"pages are descending without duplicates");
+    const chronox::TimeRange filter{base+durationTicks(30min),base+durationTicks(24h+45min)};
+    const auto page=chronox::queryDashboardSessionPage(database,now,false,0,filter);
+    const auto history=chronox::queryDashboardHistory(database,CalendarPeriod::Week,base,now,false,nullptr,filter);
+    require(page.size()==2 && page[0].duration==45min && page[1].duration==30min && history.duration==75min,"range clips both boundary contributions exactly");
+    require(history.buckets.front().range.start==filter.start && history.buckets.back().range.end==filter.end,"range chart uses identical bounds");
+    require(database.latestRecordedTimestamp()==before,"paged and filtered reads do not checkpoint");
+    SessionDatabase reader(file.path(),chronox::StorageMode::ReadOnly);
+    require(reader.querySessionPage(now,100).size()==25,"read-only reader supports bounded legacy pages");
 }
 
 } // namespace
 
 int main() {
+    boundedPagesAndInclusiveRange();
     measuredOverlapsUseExplicitDurationAndActiveIdentity();
     emptyDatabaseProducesEmptyOverview();
     periodsSessionsAndCrossMidnightAreAggregatedFromHistory();

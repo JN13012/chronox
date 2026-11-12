@@ -8,11 +8,11 @@ WindowCoordinator::WindowCoordinator(ErrorHandler errorHandler,
                                      SnapshotProvider snapshotProvider,
                                      HistoryProvider historyProvider,
                                      DashboardWindow::SettingsProvider settingsProvider,
-                                     DashboardWindow::SettingsHandler settingsHandler)
+                                     DashboardWindow::SettingsHandler settingsHandler, DashboardReadProviders reads)
     : errorHandler_(std::move(errorHandler)),
       snapshotProvider_(std::move(snapshotProvider)),
       historyProvider_(std::move(historyProvider)),
-      settingsProvider_(std::move(settingsProvider)), settingsHandler_(std::move(settingsHandler)) {}
+      settingsProvider_(std::move(settingsProvider)), settingsHandler_(std::move(settingsHandler)), reads_(std::move(reads)) {}
 
 WindowCoordinator::~WindowCoordinator() = default;
 
@@ -20,7 +20,7 @@ void WindowCoordinator::openDashboard() {
     if (dashboard_ == nullptr) {
         dashboard_ =
             std::make_unique<DashboardWindow>(errorHandler_, snapshotProvider_,
-                                              historyProvider_, settingsProvider_, settingsHandler_);
+                                              historyProvider_, settingsProvider_, settingsHandler_, reads_);
     }
     dashboard_->showOrActivate();
 }

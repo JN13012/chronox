@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
+#include <limits>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -546,12 +547,16 @@ void SessionDatabase::updateTemporal(TemporalEngine& engine, bool durable, Activ
 }
 
 ActivityReport SessionDatabase::queryActivity(CalendarPeriod period, Timestamp anchor, const CalendarTimeConverter* converter) const {
+    return queryActivity(converter ? calendarPeriodContaining(anchor,period,*converter) : calendarPeriodContaining(anchor,period));
+}
+
+ActivityReport SessionDatabase::queryActivity(TimeRange range) const {
+    if(range.end<=range.start) throw std::invalid_argument("Invalid activity range");
     ActivityReport report;
     if(!impl_->hasActivity) return report;
-    const auto range=converter ? calendarPeriodContaining(anchor,period,*converter) : calendarPeriodContaining(anchor,period);
-    Statement coverage(impl_->database,"SELECT EXISTS(SELECT 1 FROM activity_coverage WHERE utc_end>=?1 AND utc_start<?2)");
+    Statement coverage(impl_->database,"SELECT EXISTS(SELECT 1 FROM activity_coverage WHERE utc_end>?1 AND utc_start<?2)");
     coverage.bind(range.start,1); coverage.bind(range.end,2); coverage.step(); report.measured=coverage.integer(0)!=0;
-    if(impl_->liveCoverage && impl_->liveCoverage->utcEnd>=range.start && impl_->liveCoverage->utcStart<range.end) report.measured=true;
+    if(impl_->liveCoverage && impl_->liveCoverage->utcEnd>range.start && impl_->liveCoverage->utcStart<range.end) report.measured=true;
     const auto append=[&](SessionContribution c) {
         const auto d=contributionWithin(c,range);
         if(d.count()<=0) return;
@@ -643,6 +648,41 @@ HistoryReport SessionDatabase::queryMeasuredHistory(TimeRange range, CalendarPer
     return report;
 }
 
+std::vector<SessionContribution> SessionDatabase::querySessionPage(Timestamp now,
+    std::size_t offset, std::size_t limit, std::optional<TimeRange> range) const {
+    if (!limit || limit>200 || offset>100000000) throw std::invalid_argument("Invalid session page");
+    const bool measured = impl_->mode==StorageMode::Measured || impl_->mode==StorageMode::Activity;
+    std::string sql = "SELECT * FROM (SELECT started_at_us s, COALESCE(ended_at_us,?1) e, "
+        "COALESCE(ended_at_us,?1)-started_at_us d, ended_at_us IS NULL a, 0 ep, 0 source, id key1, 0 key2 FROM session_intervals";
+    // Read-only mode displays only durable legacy checkpoints, never extrapolates them.
+    if (impl_->mode==StorageMode::ReadOnly || impl_->hasMeasured)
+        sql = "SELECT * FROM (SELECT started_at_us s, COALESCE(ended_at_us,checkpoint_at_us) e, "
+            "COALESCE(ended_at_us,checkpoint_at_us)-started_at_us d, 0 a, 0 ep, 0 source, id key1, 0 key2 FROM session_intervals";
+    if (impl_->hasMeasured) sql += " UNION ALL SELECT utc_start,utc_end,duration_us,active*?2,epoch,1,run_id,seq "
+        "FROM measured_spans WHERE NOT(run_id=?3 AND seq=?4)";
+    sql += " UNION ALL SELECT ?5,?6,?7,1,?8,2,0,0 WHERE ?9) "
+        "WHERE e>?10 AND s<?11 AND d>=0 ORDER BY s DESC,source DESC,key1 DESC,key2 DESC LIMIT ?12 OFFSET ?13";
+    Statement q(impl_->database,sql.c_str());
+    q.bind(now,1); q.bind(measured?1:0,2); q.bind(impl_->live?impl_->run:-1,3);
+    q.bind(impl_->live?impl_->live->sequence:-1,4);
+    q.bind(impl_->live?impl_->live->utcStart:0,5); q.bind(impl_->live?impl_->live->utcEnd:0,6);
+    q.bind(impl_->live?impl_->live->duration:0,7); q.bind(impl_->live?impl_->live->epoch:0,8);
+    q.bind(impl_->live?1:0,9); q.bind(range?range->start:std::numeric_limits<Timestamp>::min(),10);
+    q.bind(range?range->end:std::numeric_limits<Timestamp>::max(),11);
+    q.bind(static_cast<Timestamp>(limit),12); q.bind(static_cast<Timestamp>(offset),13);
+    std::vector<SessionContribution> rows;
+    while(q.step()==SQLITE_ROW) {
+        SessionContribution c{{q.integer(0),q.integer(1)},std::chrono::microseconds(q.integer(2)),q.integer(3)!=0,q.integer(4)};
+        if(range) { const auto duration=contributionWithin(c,*range);
+            c.active=c.active && c.interval.end<=range->end;
+            c.interval={std::max(c.interval.start,range->start),std::min(c.interval.end,range->end)};
+            c.duration=duration;
+        }
+        rows.push_back(c);
+    }
+    return rows;
+}
+
 void SessionDatabase::backupTo(
     const std::filesystem::path& destination) const {
     impl_->backupTo(destination);
@@ -701,6 +741,7 @@ HistoryReport SessionDatabase::queryHistory(TimeRange range,
                                             CalendarPeriod period,
                                             Timestamp now,
                                             const CalendarTimeConverter* converter) const {
+    if(range.end<=range.start) throw std::invalid_argument("Invalid history range");
     if (impl_->hasMeasured || impl_->mode == StorageMode::ReadOnly)
         return queryMeasuredHistory(range,period,converter);
     const Timestamp effectiveEnd = std::min(range.end, now);

@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <vector>
+#include <optional>
 
 namespace chronox {
 
@@ -65,7 +66,11 @@ DashboardSnapshot queryDashboardSnapshot(
 DashboardHistorySnapshot queryDashboardHistory(
     const SessionDatabase& database, CalendarPeriod period, Timestamp anchor,
     Timestamp now, bool trackingActive = false,
-    const CalendarTimeConverter* converter = nullptr);
+    const CalendarTimeConverter* converter = nullptr,
+    std::optional<TimeRange> filter = std::nullopt);
+
+std::vector<DashboardSession> queryDashboardSessionPage(const SessionDatabase&, Timestamp now,
+    bool trackingActive, std::size_t offset, std::optional<TimeRange> filter = std::nullopt);
 
 Timestamp shiftCalendarPeriod(Timestamp anchor, CalendarPeriod period,
                               int delta,

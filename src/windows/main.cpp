@@ -220,6 +220,15 @@ int runChronox(bool startHidden,
             activity.configure(settings);
             activity.advance(engine->snapshot(),engine->snapshot(),engine->snapshot().utc,chronox::sampleWindowsInput());
             database.updateTemporal(*engine,true,&activity);
+        }, {
+            [&](std::size_t offset, std::optional<chronox::TimeRange> range) {
+                const auto state=engine->snapshot();
+                return chronox::queryDashboardSessionPage(database,state.utc,state.counting,offset,range);
+            },
+            [&](chronox::CalendarPeriod period, chronox::TimeRange range) {
+                const auto state=engine->snapshot();
+                return chronox::queryDashboardHistory(database,period,range.start,state.utc,state.counting,nullptr,range);
+            }
         });
 
     const auto stop = [&] {
@@ -262,7 +271,7 @@ int runChronox(bool startHidden,
             try {
                 if (!engine) return;
                 const auto previousActivityState=activity.state();
-                const auto state=observe();
+                const auto state=engine->snapshot();
                 const bool checkpointDue=state.sample.steady-lastCheckpoint>=60'000'000;
                 if(checkpointDue) {
                     database.updateTemporal(*engine, true, &activity);

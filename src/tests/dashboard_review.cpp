@@ -2,6 +2,8 @@
 // Arguments: page(0..2) clientWidth clientHeight seconds(0=manual) output.json state
 #include "../windows/dashboard_window.h"
 #include <windows.h>
+#include <commctrl.h>
+#include <ctime>
 #include "../windows/ui_window_geometry.h"
 #include <psapi.h>
 #include <objbase.h>
@@ -47,12 +49,16 @@ int main(int argc, char** argv) try {
     snapshot.recentSessions = {{{snapshot.capturedAt - 3'600'000'000LL,
                                   snapshot.capturedAt}, 1h, true}};
     if (state == "reference") snapshot.activityState = ActivityState::Active;
-    for (int i = 1; state == "reference" && i < 6; ++i) {
-        const auto end = snapshot.capturedAt - i * 7'200'000'000LL;
+    snapshot.daysWithSession={1,5,19,210}; snapshot.monthDailyAverage=7h+6min;
+    for (int i = 1; i < 125; ++i) {
+        const auto end = snapshot.capturedAt - i * 86'400'000'000LL;
         snapshot.recentSessions.push_back({{end - 3'600'000'000LL, end}, 1h, false});
     }
-    DashboardWindow window([&](auto e) { error = e; }, [&] { return snapshot; },
-        [&](CalendarPeriod p, Timestamp t) {
+    const auto allSessions=snapshot.recentSessions;
+    snapshot.recentSessions.resize(std::min<std::size_t>(50,snapshot.recentSessions.size()));
+    int rangeReads=0,pageReads=0;
+    std::optional<TimeRange> lastRange;
+    const auto historyProvider = [&](CalendarPeriod p, Timestamp t) {
             DashboardHistorySnapshot h;
             h.period = p; h.anchor = t; h.range = calendarPeriodContaining(t, p);
             h.capturedAt = snapshot.capturedAt;
@@ -67,8 +73,41 @@ int main(int argc, char** argv) try {
                 h.buckets.push_back({range, 5h + 27min});
                 day = range.end;
             }
-            return h;
-        }, [&] { return settings; }, [&](auto s) { settings = s; });
+            return h;        };
+    const auto pageProvider = [&](std::size_t offset,std::optional<TimeRange> range) {
+        ++pageReads;
+        std::vector<DashboardSession> rows;
+        std::size_t skipped=0;
+        for(auto session:allSessions) {
+            if(range) {
+                const auto start=std::max(session.interval.start,range->start), end=std::min(session.interval.end,range->end);
+                if(end<=start) continue;
+                session.active=session.active && end==session.interval.end;
+                session.interval={start,end}; session.duration=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::microseconds(end-start));
+            }
+            if(skipped++<offset) continue;
+            rows.push_back(session); if(rows.size()==50) break;
+        }
+        return rows;
+    };
+    const auto rangeProvider = [&](CalendarPeriod p,TimeRange range) {
+        ++rangeReads; lastRange=range;
+        auto h=historyProvider(p,range.start); h.range=range; h.sessions=pageProvider(0,range); h.buckets.clear(); h.duration={};
+        Timestamp start=range.start;
+        const auto stride=std::max(1,static_cast<int>((range.end-range.start)/86'400'000'000LL/31)+1);
+        while(start<range.end) {
+            const auto end=std::min(range.end,calendarPeriodContaining(shiftCalendarPeriod(start,CalendarPeriod::Day,stride),CalendarPeriod::Day).start);
+            std::chrono::seconds duration{};
+            for(const auto& s:allSessions) {
+                const auto a=std::max(start,s.interval.start), b=std::min(end,s.interval.end);
+                if(b>a) duration+=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::microseconds(b-a));
+            }
+            h.buckets.push_back({{start,end},duration}); h.duration+=duration; start=end;
+        }
+        return h;
+    };
+    DashboardWindow window([&](auto e) { error = e; }, [&] { return snapshot; },historyProvider,
+        [&] { return settings; }, [&](auto s) { settings = s; },{pageProvider,rangeProvider});
     window.showOrActivate();
     HWND own{};
     EnumThreadWindows(GetCurrentThreadId(), [](HWND w, LPARAM p) -> BOOL {
@@ -114,10 +153,30 @@ int main(int argc, char** argv) try {
     if (!seconds) {
         while (IsWindowVisible(own)) { pump(); std::this_thread::sleep_for(10ms); }
     } else {
+        // Test only this fixture's own native controls; no production data or settings.
+        select(1); pump();
+        SYSTEMTIME first{},last{};
+        const auto localDate=[](Timestamp timestamp) {
+            const auto seconds=static_cast<std::time_t>(timestamp/1'000'000);
+            std::tm local{}; localtime_s(&local,&seconds);
+            return SYSTEMTIME{static_cast<WORD>(local.tm_year+1900),static_cast<WORD>(local.tm_mon+1),0,static_cast<WORD>(local.tm_mday),0,0,0,0};
+        };
+        first=localDate(shiftCalendarPeriod(snapshot.capturedAt,CalendarPeriod::Day,-10)); last=localDate(snapshot.capturedAt);
+        SendMessageW(GetDlgItem(own,3201),DTM_SETSYSTEMTIME,GDT_VALID,reinterpret_cast<LPARAM>(&first));
+        SendMessageW(GetDlgItem(own,3202),DTM_SETSYSTEMTIME,GDT_VALID,reinterpret_cast<LPARAM>(&last));
+        SendMessageW(own,WM_COMMAND,MAKEWPARAM(3203,BN_CLICKED),0); pump();
+        const auto expectedStart=calendarPeriodContaining(shiftCalendarPeriod(snapshot.capturedAt,CalendarPeriod::Day,-10),CalendarPeriod::Day).start;
+        if(rangeReads!=1 || !lastRange || lastRange->start!=expectedStart || lastRange->end!=snapshot.todayRange.end)
+            throw std::runtime_error("Inclusive native range filter failed");
+        const int readsBeforePaint=rangeReads+pageReads;
+        InvalidateRect(own,nullptr,FALSE); UpdateWindow(own); pump();
+        if(rangeReads+pageReads!=readsBeforePaint) throw std::runtime_error("Read provider called during paint");
+        SendMessageW(own,WM_COMMAND,MAKEWPARAM(3204,BN_CLICKED),0); pump();
+        std::cout << "Inclusive native dates, reset and paint-only cache: PASS\n";
         // Warm all pages before collecting comparable process-wide resource counts.
         for (int i = 0; i < 6; ++i) { select(i % 3); pump(); }
         select(page);
-        until(std::chrono::steady_clock::now() + 3s);
+        until(std::chrono::steady_clock::now() + 16s);
         const auto metrics = [] {
             PROCESS_MEMORY_COUNTERS_EX m{}; m.cb = sizeof(m);
             GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&m), sizeof(m));
@@ -135,7 +194,7 @@ int main(int argc, char** argv) try {
         const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         std::ofstream out(argc > 5 ? argv[5] : "dashboard-resources.json");
         out << "{\"page\":" << page << ",\"width\":" << width << ",\"height\":" << height
-            << ",\"seconds\":" << elapsed << ",\"cpu_one_core_percent\":"
+            << ",\"dpi\":" << dpi << ",\"seconds\":" << elapsed << ",\"cpu_one_core_percent\":"
             << (after[0] - before[0]) / 1e7 / elapsed * 100 << ",\"before\":[";
         for (int i = 1; i < 6; ++i) out << (i == 1 ? "" : ",") << before[i];
         out << "],\"after\":[";
