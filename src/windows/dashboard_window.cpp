@@ -3,6 +3,7 @@
 #include "resource.h"
 #include "dashboard_layout.h"
 #include "dashboard_messages.h"
+#include "dashboard_text_selection.h"
 #include "ui_text.h"
 
 #include <windows.h>
@@ -21,6 +22,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <cwchar>
+#include <cstring>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -375,6 +377,9 @@ struct DashboardWindow::Impl {
     std::array<float, 3> contentScroll{};
     float maximumContentScroll{};
     bool settingsNavigationReturn{};
+    ui::DashboardTextSelection textSelection;
+    D2D1_RECT_F textClip{};
+    bool textDragging{};
     D2D1_RECT_F historyDetailsBounds{};
     HFONT settingsFont{};
 
@@ -587,6 +592,7 @@ struct DashboardWindow::Impl {
     }
 
     void releaseRenderResources() noexcept {
+        textSelection.clearCache();
         renderTarget.Reset();
         metalGradient.Reset();
         canvasGradient.Reset();
@@ -619,12 +625,15 @@ struct DashboardWindow::Impl {
             return;
         }
         renderTarget->BeginDraw();
+        textSelection.beginFrame();
+        textClip = D2D1::RectF(0,0,clientSize().width,clientSize().height);
         renderTarget->Clear(color(ui::palette::background));
         canvasGradient->SetStartPoint(D2D1::Point2F(0, 0));
         canvasGradient->SetEndPoint(D2D1::Point2F(clientSize().width, clientSize().height));
         renderTarget->FillRectangle(D2D1::RectF(0, 0, clientSize().width, clientSize().height), canvasGradient.Get());
         drawSidebar();
         drawContent();
+        textSelection.endFrame();
         const HRESULT result = renderTarget->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
             renderTarget.Reset();
@@ -647,11 +656,58 @@ struct DashboardWindow::Impl {
         checkHr(result, "ID2D1RenderTarget::EndDraw(dashboard)");
     }
 
+    void cancelTextSelection() {
+        textDragging = false;
+        if (GetCapture() == window) ReleaseCapture();
+        textSelection.clearSelection();
+    }
+
+    bool selectableAt(float x, float y) const {
+        if (hitTestPage(static_cast<int>(x),static_cast<int>(y)) >= 0) return false;
+        int value{};
+        if (activePage == DashboardPage::History && y >= 142 && y < clientSize().height-32 &&
+            hitTestHistory(static_cast<int>(x),static_cast<int>(y+contentScroll[1]),value) >= 0) return false;
+        return textSelection.hit(x,y).has_value();
+    }
+
+    void copySelectedText() {
+        const auto text = textSelection.copyText();
+        if (text.empty()) return;
+        const auto bytes = (text.size()+1)*sizeof(wchar_t);
+        HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE,bytes);
+        if (!memory) return;
+        void* data = GlobalLock(memory);
+        if (!data) { GlobalFree(memory); return; }
+        std::memcpy(data,text.c_str(),bytes);
+        GlobalUnlock(memory);
+        if (!OpenClipboard(window)) { GlobalFree(memory); return; }
+        if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT,memory)) memory = nullptr;
+        CloseClipboard();
+        if (memory) GlobalFree(memory);
+    }
+
+    void drawSelectableText(std::wstring_view text, IDWriteTextFormat* format,
+                            ID2D1Brush* brush, D2D1_RECT_F bounds,
+                            DWRITE_TEXT_ALIGNMENT alignment, bool metric = false) {
+        D2D1_MATRIX_3X2_F transform{}; renderTarget->GetTransform(&transform);
+        auto& run = textSelection.append(writeFactory.Get(),text,format,
+            bounds.right-bounds.left,bounds.bottom-bounds.top,alignment,
+            bounds.left+transform._31,bounds.top+transform._32,textClip,metric);
+        if (textSelection.currentSelected()) {
+            renderTarget->PushAxisAlignedClip(bounds,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            for (const auto& h : textSelection.highlights())
+                renderTarget->FillRectangle(D2D1::RectF(bounds.left+h.left,bounds.top+h.top,
+                    bounds.left+h.left+h.width,bounds.top+h.top+h.height),selectionBrush.Get());
+            renderTarget->PopAxisAlignedClip();
+        }
+        renderTarget->DrawTextLayout(D2D1::Point2F(bounds.left,bounds.top),run.layout.Get(),brush,
+                                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
     void drawText(const wchar_t* text, IDWriteTextFormat* format,
-                  ID2D1Brush* brush, D2D1_RECT_F bounds) {
-        renderTarget->DrawText(
-            text, static_cast<UINT32>(wcslen(text)), format, bounds, brush,
-            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                  ID2D1Brush* brush, D2D1_RECT_F bounds,
+                  DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING) {
+        drawSelectableText(text,format,brush,bounds,alignment);
     }
 
     void drawCard(D2D1_RECT_F bounds, bool highlighted = false) {
@@ -713,12 +769,7 @@ struct DashboardWindow::Impl {
     }
 
     void drawMetric(const std::wstring& value, D2D1_RECT_F bounds) {
-        ComPtr<IDWriteTextLayout> layout;
-        checkHr(ui::createMetricLayout(writeFactory.Get(), value,
-                    bounds.right - bounds.left, bounds.bottom - bounds.top, &layout),
-                "Measure dashboard duration without truncation");
-        renderTarget->DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top),
-                                    layout.Get(), textBrush.Get());
+        drawSelectableText(value,nullptr,textBrush.Get(),bounds,DWRITE_TEXT_ALIGNMENT_LEADING,true);
     }
 
     void drawMeasurementNotice(float left, float right, float top, bool measured, bool uncertain) {
@@ -891,10 +942,10 @@ struct DashboardWindow::Impl {
                 (totalMinutes % 60 < 10 ? L"0" : L"") + std::to_wstring(totalMinutes % 60);
             drawText(amount.c_str(), compactNavFormat.Get(), textBrush.Get(),
                 D2D1::RectF(center-slotWidth/2, chartBottom-valueHeight-18,
-                            center+slotWidth/2, chartBottom-valueHeight-2));
+                            center+slotWidth/2, chartBottom-valueHeight-2),DWRITE_TEXT_ALIGNMENT_CENTER);
             drawText(labels[index], compactNavFormat.Get(), textBrush.Get(),
                      D2D1::RectF(center - slotWidth / 2.0f, chartBottom + 3.0f,
-                                 center + slotWidth / 2.0f, bounds.bottom - 2.0f));
+                                 center + slotWidth / 2.0f, bounds.bottom - 2.0f),DWRITE_TEXT_ALIGNMENT_CENTER);
         }
     }
 
@@ -1030,6 +1081,7 @@ struct DashboardWindow::Impl {
     }
 
     void navigateHistory(int delta) {
+        cancelTextSelection();
         historyAnchor =
             shiftCalendarPeriod(historyAnchor, historyPeriod, delta);
         selectedHistoryDay =
@@ -1040,6 +1092,7 @@ struct DashboardWindow::Impl {
     }
 
     void chooseHistoryPeriod(CalendarPeriod period) {
+        cancelTextSelection();
         historyPeriod = period;
         historyAnchor = selectedHistoryDay;
         sessionScrollOffset = 0;
@@ -1048,6 +1101,7 @@ struct DashboardWindow::Impl {
     }
 
     void selectHistoryDay(Timestamp timestamp) {
+        cancelTextSelection();
         selectedHistoryDay =
             calendarPeriodContaining(timestamp, CalendarPeriod::Day).start;
         historyAnchor = selectedHistoryDay;
@@ -1749,6 +1803,7 @@ struct DashboardWindow::Impl {
     }
 
     void scrollContent(float delta) {
+        cancelTextSelection();
         auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
         scroll = std::clamp(scroll + delta, 0.f, maximumContentScroll);
         render();
@@ -1810,6 +1865,7 @@ struct DashboardWindow::Impl {
             ~ContentScope() { target->SetTransform(D2D1::Matrix3x2F::Identity()); target->PopAxisAlignedClip(); }
         } scope{renderTarget.Get()};
         renderTarget->PushAxisAlignedClip(D2D1::RectF(contentLeft+1,panelTop+1,contentRight-1,panelBottom-1), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        textClip = D2D1::RectF(contentLeft+1,panelTop+1,contentRight-1,panelBottom-1);
         renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(0, -scroll));
 
         if (activePage == DashboardPage::Overview) {
@@ -1846,6 +1902,7 @@ struct DashboardWindow::Impl {
     }
 
     void selectPage(int index) {
+        cancelTextSelection();
         if (index < 0 || index >= static_cast<int>(PageLabels.size())) {
             return;
         }
@@ -1874,6 +1931,7 @@ struct DashboardWindow::Impl {
     }
 
     void changeFocusedPage(int delta) {
+        cancelTextSelection();
         if (focusedPage < 0) {
             focusedPage = static_cast<int>(activePage);
         } else {
@@ -2006,12 +2064,14 @@ struct DashboardWindow::Impl {
         case WM_ERASEBKGND:
             return 1;
         case WM_SIZE:
+            cancelTextSelection();
             if (renderTarget != nullptr && wParam != SIZE_MINIMIZED) {
                 resizeRenderTarget();
                 render();
             }
             return 0;
         case WM_DPICHANGED: {
+            cancelTextSelection();
             dpi = HIWORD(wParam);
             const auto* suggested = reinterpret_cast<const RECT*>(lParam);
             if (!SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
@@ -2060,7 +2120,38 @@ struct DashboardWindow::Impl {
                 return 0;
             }
             return DefWindowProcW(hwnd,message,wParam,lParam);
+        case WM_LBUTTONDOWN: {
+            const float x=GET_X_LPARAM(lParam)*96.f/dpi, y=GET_Y_LPARAM(lParam)*96.f/dpi;
+            const bool hadSelection=textSelection.hasSelection();
+            cancelTextSelection();
+            if (selectableAt(x,y) && textSelection.beginSelection(x,y)) {
+                SetFocus(hwnd); textDragging=true; SetCapture(hwnd); render(); return 0;
+            }
+            if (hadSelection) render();
+            return DefWindowProcW(hwnd,message,wParam,lParam);
+        }
+        case WM_MOUSEMOVE:
+            if (textDragging && GetCapture()==hwnd &&
+                textSelection.drag(GET_X_LPARAM(lParam)*96.f/dpi,GET_Y_LPARAM(lParam)*96.f/dpi)) render();
+            return 0;
+        case WM_CAPTURECHANGED:
+            textDragging=false;
+            return 0;
+        case WM_SETCURSOR:
+            if (LOWORD(lParam)==HTCLIENT) {
+                POINT point{}; GetCursorPos(&point); ScreenToClient(hwnd,&point);
+                if (selectableAt(point.x*96.f/dpi,point.y*96.f/dpi)) {
+                    SetCursor(LoadCursorW(nullptr,IDC_IBEAM)); return TRUE;
+                }
+            }
+            return DefWindowProcW(hwnd,message,wParam,lParam);
         case WM_LBUTTONUP: {
+            if (textDragging) {
+                textSelection.drag(GET_X_LPARAM(lParam)*96.f/dpi,GET_Y_LPARAM(lParam)*96.f/dpi);
+                textDragging=false;
+                if (GetCapture()==hwnd) ReleaseCapture();
+                render(); return 0;
+            }
             const int x = MulDiv(GET_X_LPARAM(lParam), 96,
                                  static_cast<int>(dpi));
             const int y = MulDiv(GET_Y_LPARAM(lParam), 96,
@@ -2079,6 +2170,7 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_VSCROLL: {
+            cancelTextSelection();
             const int action = LOWORD(wParam);
             if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) {
                 SCROLLINFO info{sizeof(SCROLLINFO), SIF_TRACKPOS};
@@ -2094,6 +2186,7 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_MOUSEWHEEL: {
+            cancelTextSelection();
             POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             ScreenToClient(hwnd, &point);
             const float y = point.y * 96.f / dpi;
@@ -2122,6 +2215,13 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_KEYDOWN:
+            if ((GetKeyState(VK_CONTROL)&0x8000) && textSelection.hasSelection()) {
+                if (wParam=='C' || wParam==VK_INSERT) { copySelectedText(); return 0; }
+                if (wParam=='A') { textSelection.selectAll(); render(); return 0; }
+            }
+            if (wParam==VK_ESCAPE && textSelection.hasSelection()) {
+                cancelTextSelection(); render(); return 0;
+            }
             if (activePage == DashboardPage::Settings && wParam == VK_TAB && activityCheckbox) {
                 const bool backwards = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
                 if (settingsNavigationReturn) {
@@ -2219,6 +2319,7 @@ struct DashboardWindow::Impl {
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         case WM_CLOSE:
+            cancelTextSelection();
             KillTimer(hwnd, DashboardRefreshTimerId);
             ShowWindow(hwnd, SW_HIDE);
             ShowWindow(calendarWindow, SW_HIDE);

@@ -2,6 +2,7 @@
 #include "../windows/dashboard_window.h"
 #include <windows.h>
 #include "../windows/ui_window_geometry.h"
+#include "../windows/dashboard_layout.h"
 #include <objbase.h>
 #include <iostream>
 #include <algorithm>
@@ -94,6 +95,15 @@ int main() try {
             check(actual.right==MulDiv(size.cx,dpi,96) && actual.bottom==MulDiv(size.cy,dpi,96));
             for(int page=0;page<3;++page) {
                 clickPage(page);
+                const int titleX=static_cast<int>(ui::DashboardLayout{static_cast<float>(size.cx),static_cast<float>(size.cy)}.left()+8);
+                const auto titlePoint=MAKELPARAM(MulDiv(titleX,dpi,96),MulDiv(70,dpi,96));
+                SendMessageW(own,WM_LBUTTONDOWN,MK_LBUTTON,titlePoint);
+                check(GetCapture()==own);
+                SendMessageW(own,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(MulDiv(titleX+35,dpi,96),MulDiv(70,dpi,96)));
+                SendMessageW(own,WM_LBUTTONUP,0,MAKELPARAM(MulDiv(titleX+35,dpi,96),MulDiv(70,dpi,96)));
+                check(GetCapture()!=own);
+                SendMessageW(own,WM_KEYDOWN,VK_ESCAPE,0);
+                check(IsWindowVisible(own)); // first Escape clears text, not the dashboard
                 SendMessageW(own,WM_VSCROLL,SB_BOTTOM,0);
                 SCROLLINFO info{sizeof(info),SIF_ALL}; check(GetScrollInfo(own,SB_VERT,&info));
                 check(info.nPos==std::max(0,info.nMax-static_cast<int>(info.nPage)+1));

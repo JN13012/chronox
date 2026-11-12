@@ -6,6 +6,7 @@
 #include <limits>
 #ifdef _WIN32
 #include "../windows/ui_text.h"
+#include "../windows/dashboard_text_selection.h"
 #include <objbase.h>
 #endif
 
@@ -34,6 +35,63 @@ int main() try {
     ComPtr<IDWriteFactory> factory;
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                 reinterpret_cast<IUnknown**>(factory.GetAddressOf())))) return 1;
+    {
+        const auto require=[](bool ok,const char* message) { if(!ok) throw std::runtime_error(message); };
+        ComPtr<IDWriteTextFormat> format;
+        require(SUCCEEDED(createTextFormat(factory.Get(),type::label,&format)),"Selection format");
+        DashboardTextSelection selection;
+        const D2D1_RECT_F clip{0,0,500,200};
+        selection.beginFrame();
+        auto& run=selection.append(factory.Get(),L"Bonjour Chronox",format.Get(),220,32,
+                                    DWRITE_TEXT_ALIGNMENT_LEADING,10,20,clip);
+        auto* cached=run.layout.Get();
+        selection.endFrame();
+        require(selection.beginSelection(11,28),"Mouse must hit readable text");
+        require(selection.copyText()==L"Bonjour Chronox","Click selects complete block");
+        require(!selection.highlights().empty(),"Selection must have glyph highlight geometry");
+        FLOAT x{},y{}; DWRITE_HIT_TEST_METRICS hit{};
+        require(SUCCEEDED(cached->HitTestTextPosition(8,FALSE,&x,&y,&hit)),"Character position");
+        require(selection.drag(10+x+.01f,20+y+hit.height/2),"Drag selects a range");
+        require(selection.copyText()==L"Bonjour ","Drag must follow DirectWrite character boundaries");
+        selection.selectAll(); require(selection.copyText()==L"Bonjour Chronox","Select all block");
+        selection.beginFrame();
+        auto& reused=selection.append(factory.Get(),L"Bonjour Chronox",format.Get(),220,32,
+                                      DWRITE_TEXT_ALIGNMENT_LEADING,10,20,clip);
+        require(reused.layout.Get()==cached,"Repaint must reuse layout");
+        selection.endFrame(); require(selection.hasSelection(),"Unchanged repaint preserves selection");
+        selection.beginFrame();
+        selection.append(factory.Get(),L"Valeur actualis\u00e9e",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,20,clip);
+        selection.endFrame(); require(!selection.hasSelection(),"Live value update must invalidate stale selection");
+        selection.beginFrame();
+        selection.append(factory.Get(),L"Texte hors viewport",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,-40,clip);
+        selection.endFrame(); require(!selection.beginSelection(11,-32),"Clipped text cannot be selected");
+        selection.beginFrame();
+        selection.append(factory.Get(),L"Texte visible",format.Get(),220,32,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,0,{30,0,200,32});
+        selection.endFrame(); require(!selection.beginSelection(11,8),"Partial viewport clip must reject hidden glyphs");
+        selection.beginFrame();
+        auto& wrapped=selection.append(factory.Get(),L"Une longue valeur sur plusieurs lignes",format.Get(),85,100,
+                         DWRITE_TEXT_ALIGNMENT_LEADING,10,20,clip);
+        wrapped.layout->HitTestTextPosition(0,FALSE,&x,&y,&hit);
+        selection.endFrame(); require(selection.beginSelection(10+x+.1f,20+y+hit.height/2),"Wrapped text hit");
+        require(selection.highlights().size()>1,"Wrapped selection must highlight every line");
+        selection.beginFrame(); selection.endFrame();
+        require(selection.copyText().empty(),"Hidden page cannot retain selected text");
+        ComPtr<IDWriteTextFormat> barFormat;
+        require(SUCCEEDED(createTextFormat(factory.Get(),type::compact,&barFormat)),"Bar label format");
+        for(float slot : {30.f,45.f,100.f}) for(const auto* value : {L"0h00",L"2h15",L"11h06"}) {
+            selection.beginFrame();
+            auto& label=selection.append(factory.Get(),value,barFormat.Get(),slot,16,
+                DWRITE_TEXT_ALIGNMENT_CENTER,100-slot/2,30,clip);
+            DWRITE_TEXT_METRICS m{}; label.layout->GetMetrics(&m);
+            require(std::abs(label.x+m.left+m.width/2-100)<.1f && m.height<=16,
+                    "Duration must be centered over its bar without clipping");
+            selection.endFrame();
+        }
+        std::cout<<"Click/drag, exact text copy, clipping, repaint cache and centered bar labels: PASS\n";
+    }
     for (const float width : {640.f, 720.f, 759.f, 760.f, 819.f, 820.f, 1050.f, 1370.f, 1440.f, 1600.f}) {
         const auto layout = DashboardLayout{width, 520};
         const int columns = DashboardLayout::metricColumns(layout.innerWidth());
