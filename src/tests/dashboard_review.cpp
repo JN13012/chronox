@@ -134,14 +134,19 @@ int main(int argc, char** argv) try {
     if (!GetMonitorInfoW(MonitorFromWindow(own, MONITOR_DEFAULTTONEAREST), &monitor))
         throw std::runtime_error("Cannot position review on its monitor");
     const int outerWidth = rect.right - rect.left, outerHeight = rect.bottom - rect.top;
-    const int x = monitor.rcWork.left + std::max(0L, (monitor.rcWork.right-monitor.rcWork.left-outerWidth)/2);
-    const int y = monitor.rcWork.top + std::max(0L, (monitor.rcWork.bottom-monitor.rcWork.top-outerHeight)/2);
-    if (!SetWindowPos(own, nullptr, x, y, outerWidth, outerHeight, SWP_NOZORDER))
+    const int windowX = monitor.rcWork.left + std::max(0L, (monitor.rcWork.right-monitor.rcWork.left-outerWidth)/2);
+    const int windowY = monitor.rcWork.top + std::max(0L, (monitor.rcWork.bottom-monitor.rcWork.top-outerHeight)/2);
+    if (!SetWindowPos(own, nullptr, windowX, windowY, outerWidth, outerHeight, SWP_NOZORDER))
         throw std::runtime_error("Cannot resize review window");
     RECT client{}; GetClientRect(own, &client);
     if (client.right != MulDiv(width, dpi, 96) || client.bottom != MulDiv(height, dpi, 96))
         throw std::runtime_error("Review client size does not match requested DIPs");
-    const auto caption = L"Chronox - revue isolee / client " + std::to_wstring(client.right) +
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+    const std::wstring reviewLabel=L"Chronox Titanium - prototype Vue generale / client ";
+#else
+    const std::wstring reviewLabel=L"Chronox - revue isolee / client ";
+#endif
+    const auto caption = reviewLabel + std::to_wstring(client.right) +
         L" x " + std::to_wstring(client.bottom) + L" px / DPI " + std::to_wstring(dpi);
     SetWindowTextW(own, caption.c_str());
     const auto select = [&](int index) {
@@ -170,9 +175,9 @@ int main(int argc, char** argv) try {
             throw std::runtime_error("Native frame, icon or page scrollbar style regressed");
         for (const bool active : {false,true}) {
             SendMessageW(own,WM_ACTIVATE,active?WA_ACTIVE:WA_INACTIVE,0);
-            COLORREF caption{};
-            if (SUCCEEDED(DwmGetWindowAttribute(own,DWMWA_CAPTION_COLOR,&caption,sizeof(caption))) &&
-                !ui::highContrastEnabled() && caption!=ui::nativeColor(active?ui::palette::sidebar:ui::palette::background))
+            COLORREF frameCaption{};
+            if (SUCCEEDED(DwmGetWindowAttribute(own,DWMWA_CAPTION_COLOR,&frameCaption,sizeof(frameCaption))) &&
+                !ui::highContrastEnabled() && frameCaption!=ui::nativeColor(active?ui::palette::sidebar:ui::palette::background))
                 throw std::runtime_error("Active/inactive DWM caption color mismatch");
         }
         SendMessageW(own,WM_ACTIVATE,GetActiveWindow()==own?WA_ACTIVE:WA_INACTIVE,0);

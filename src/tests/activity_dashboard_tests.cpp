@@ -80,12 +80,18 @@ int main() try {
         snapshot.activityMeasured.fill(true); snapshot.activityDurations.fill(std::chrono::seconds(0)); window.refresh();
         snapshot.timeUncertain=true; window.refresh(); snapshot.timeUncertain=false;
         clickPage(1); clickPage(2); check(GetDlgItem(own,3101)==enabled);
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        // Exercise the styled page itself throughout the resource-cycle test.
+        clickPage(0);
+#endif
         DWORD beforeHandles{}; GetProcessHandleCount(GetCurrentProcess(),&beforeHandles);
         const auto beforeGdi=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS), beforeUser=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
         for(int i=0;i<100;++i) { SendMessageW(own,WM_CLOSE,0,0); window.showOrActivate(); }
         check(GetDlgItem(own,3102)==delay);
         DWORD afterHandles{}; GetProcessHandleCount(GetCurrentProcess(),&afterHandles);
         const auto afterGdi=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS), afterUser=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
+        std::cout<<"Resource cycles: handles "<<beforeHandles<<" -> "<<afterHandles
+                 <<", GDI "<<beforeGdi<<" -> "<<afterGdi<<", USER "<<beforeUser<<" -> "<<afterUser<<'\n';
         check(beforeHandles==afterHandles && beforeGdi==afterGdi && beforeUser==afterUser);
         for (const auto size : {SIZE{1050,700},SIZE{720,520},SIZE{819,520},SIZE{820,520},SIZE{867,520},SIZE{868,520},SIZE{900,600},SIZE{1440,1000}}) {
             const int dpi=static_cast<int>(GetDpiForWindow(own));

@@ -9,6 +9,9 @@
 #include "ui_scrollbar.h"
 #include "ui_native_frame.h"
 #include "ui_page_scrollbar.h"
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+#include "../prototypes/titanium_style.h"
+#endif
 
 #include <windows.h>
 #include "ui_window_geometry.h"
@@ -392,6 +395,9 @@ struct DashboardWindow::Impl {
     ui::MetricCardLayout overviewSizing;
     D2D1_RECT_F historyDetailsBounds{};
     HFONT settingsFont{};
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+#include "../prototypes/titanium_overview.inl"
+#endif
 
     void showOrActivate() {
         if (window == nullptr) {
@@ -646,12 +652,19 @@ struct DashboardWindow::Impl {
             !IsWindowVisible(window)) {
             return;
         }
+
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        prepareTitanium();
+#endif
         renderTarget->BeginDraw();
         textSelection.beginFrame();
         textClip = D2D1::RectF(0,0,clientSize().width,clientSize().height);
         renderTarget->Clear(color(ui::palette::background));
         canvasGradient->SetStartPoint(D2D1::Point2F(0, 0));
         canvasGradient->SetEndPoint(D2D1::Point2F(clientSize().width, clientSize().height));
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (!titaniumOverview())
+#endif
         renderTarget->FillRectangle(D2D1::RectF(0, 0, clientSize().width, clientSize().height), canvasGradient.Get());
         drawSidebar();
         drawContent();
@@ -714,9 +727,24 @@ struct DashboardWindow::Impl {
                             ID2D1Brush* brush, D2D1_RECT_F bounds,
                             DWRITE_TEXT_ALIGNMENT alignment, bool metric = false) {
         D2D1_MATRIX_3X2_F transform{}; renderTarget->GetTransform(&transform);
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview()) {
+            if (format==compactNavFormat.Get()) format=titanium.body.Get();
+            else if (format==labelFormat.Get()) format=titanium.label.Get();
+            else if (format==titleFormat.Get()) format=titanium.title.Get();
+        }
+#endif
         auto& run = textSelection.append(writeFactory.Get(),text,format,
             bounds.right-bounds.left,bounds.bottom-bounds.top,alignment,
             bounds.left+transform._31,bounds.top+transform._32,textClip,metric);
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview() && !text.empty()) {
+            ComPtr<IDWriteTypography> existing;
+            checkHr(run.layout->GetTypography(0,&existing),"Read tabular typography");
+            if (existing.Get()!=titanium.tabular.Get())
+                checkHr(run.layout->SetTypography(titanium.tabular.Get(),{0,static_cast<UINT32>(text.size())}),"Set tabular figures");
+        }
+#endif
         if (textSelection.currentSelected()) {
             renderTarget->PushAxisAlignedClip(bounds,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             for (const auto& h : textSelection.highlights())
@@ -735,6 +763,9 @@ struct DashboardWindow::Impl {
     }
 
     void drawCard(D2D1_RECT_F bounds, bool highlighted = false) {
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview()) { drawTitaniumCard(bounds,highlighted); return; }
+#endif
         const auto card = D2D1::RoundedRect(bounds, ui::space::cardRadius, ui::space::cardRadius);
         metalGradient->SetStartPoint(D2D1::Point2F(bounds.left, bounds.top));
         metalGradient->SetEndPoint(D2D1::Point2F(bounds.right, bounds.bottom));
@@ -785,6 +816,9 @@ struct DashboardWindow::Impl {
     }
 
     void fillSessionBar(D2D1_RECT_F bounds) {
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview()) { fillTitaniumBar(bounds); return; }
+#endif
         sessionGradient->SetStartPoint(D2D1::Point2F(bounds.left, bounds.top));
         sessionGradient->SetEndPoint(D2D1::Point2F(bounds.left, bounds.bottom));
         const auto shape = D2D1::RoundedRect(bounds, 4, 4);
@@ -839,6 +873,10 @@ struct DashboardWindow::Impl {
         case ActivityState::Uncertain: activityLabel = L"Incertain"; break;
         }
         const auto status = std::wstring(snapshot.activityDetectionEnabled ? activityLabel : L"Détection désactivée") + (snapshot.timeUncertain && snapshot.activityState!=ActivityState::Uncertain ? L" · Incertain" : L"") + L" · F1";
+
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview()) { drawTitaniumStatus(status,left,right,top); return; }
+#endif
         drawText(status.c_str(),labelFormat.Get(),mutedBrush.Get(),
             D2D1::RectF(left,top,right,top+34),DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
@@ -969,6 +1007,16 @@ struct DashboardWindow::Impl {
         const float chartTop = bounds.top + 62.0f;
         const float chartBottom = bounds.bottom - 23.0f;
         const float chartHeight = std::max(8.0f, chartBottom - chartTop);
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview()) {
+            borderBrush->SetOpacity(.25f);
+            for (float fraction : {0.f,.5f,1.f}) {
+                const float y=chartBottom-chartHeight*fraction;
+                renderTarget->DrawLine(D2D1::Point2F(chartLeft,y),D2D1::Point2F(chartRight,y),borderBrush.Get(),.75f);
+            }
+            borderBrush->SetOpacity(1);
+        }
+#endif
         const float slotWidth = (chartRight - chartLeft) / 7.0f;
         const auto maximum = std::max_element(
             snapshot.weekDays.begin(), snapshot.weekDays.end(),
@@ -1174,6 +1222,9 @@ struct DashboardWindow::Impl {
         return formatHistoryTime(session.interval.start)+L" – "+end;
     }
     void drawSessionTable(D2D1_RECT_F bounds,bool history) {
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (!history && titaniumOverview()) { drawTitaniumSessionTable(bounds); return; }
+#endif
         tableBounds=bounds; tableActions.clear();
         const auto& rows=history?historyRows:snapshot.recentSessions;
         auto& offset=history?sessionScrollOffset:recentScrollOffset;
@@ -2056,6 +2107,9 @@ struct DashboardWindow::Impl {
         drawText(L"CHRONOX  /  TABLEAU DE BORD", compactNavFormat.Get(),
                  mutedBrush.Get(),
                  D2D1::RectF(contentLeft, 28.0f, contentRight, 48.0f));
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        if (titaniumOverview()) drawText(L"CHRONOX  /  TABLEAU DE BORD",titanium.body.Get(),mutedBrush.Get(),D2D1::RectF(contentLeft,24,contentLeft+230,44));
+#endif
         if (activePage==DashboardPage::Overview)
             drawTrackingStatus(ui::DashboardLayout{size.width,size.height}.statusLeft(),contentRight,24);
         drawText(title, titleFormat.Get(), textBrush.Get(),
@@ -2374,9 +2428,24 @@ struct DashboardWindow::Impl {
             return DefWindowProcW(hwnd,message,wParam,lParam);
         }
         case WM_MOUSEMOVE:
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+            if (titaniumOverview() && !textDragging) {
+                if (!titanium.tracking) {
+                    TRACKMOUSEEVENT track{sizeof(TRACKMOUSEEVENT),TME_LEAVE,hwnd,0};
+                    TrackMouseEvent(&track); titanium.tracking=true;
+                }
+                titaniumPointer(GET_X_LPARAM(lParam)*96.f/dpi,GET_Y_LPARAM(lParam)*96.f/dpi);
+            }
+#endif
             if (textDragging && GetCapture()==hwnd &&
                 textSelection.drag(GET_X_LPARAM(lParam)*96.f/dpi,GET_Y_LPARAM(lParam)*96.f/dpi)) render();
             return 0;
+#ifdef CHRONOX_TITANIUM_PROTOTYPE
+        case WM_MOUSELEAVE:
+            titanium.tracking=false;
+            if (titaniumOverview()) titaniumPointer(0,0,true);
+            return 0;
+#endif
         case WM_CAPTURECHANGED:
             textDragging=false;
             return 0;
