@@ -1,0 +1,4 @@
+Native frame/icon and active/inactive DWM readback: PASS
+Page rail/drag/wheel/PageUp/PageDown/Home/End/focus: PASS
+Weekly scroll, rounded thumb drag and keyboard: PASS
+Inclusive native dates, reset and paint-only cache: PASS

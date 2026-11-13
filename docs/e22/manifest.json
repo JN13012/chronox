@@ -1,0 +1,107 @@
+{
+  "codeCommit": "7f380ef",
+  "fixtureState": "standard",
+  "dpi": 96,
+  "pairedViews": [
+    "1050x700",
+    "720x520",
+    "720x520-bottom"
+  ],
+  "files": [
+    {
+      "file": "after-1050x700.jpg",
+      "bytes": 79721,
+      "sha256": "bfaa427d7a992b4c7b28104f7a163b71108ae2dedca85d499e7ba990947b8a81"
+    },
+    {
+      "file": "after-720x520-bottom.jpg",
+      "bytes": 47828,
+      "sha256": "a12f2e38551d9c062c0cfa1261ec99762f77cb376ca96ec391e551ef544a3fd0"
+    },
+    {
+      "file": "after-720x520.jpg",
+      "bytes": 43858,
+      "sha256": "a47c52afbe75af37cf8654a8ed0b8f990bb4866e7c6f8b4049c2681d441b1e15"
+    },
+    {
+      "file": "before-1050x700.jpg",
+      "bytes": 70954,
+      "sha256": "8b39236fb5e567348c35094b2db0ec75b30ca858bec9ef2fd4979c8e8a06c999"
+    },
+    {
+      "file": "before-720x520-bottom.jpg",
+      "bytes": 44152,
+      "sha256": "2ab1e81cebb637885aea695efde3259566c07f0b9905d657152157dc88359af7"
+    },
+    {
+      "file": "before-720x520.jpg",
+      "bytes": 38487,
+      "sha256": "cf7b651ba50b8aa5ebcc267e82b4cce37ffd9a2307fb0a3c8b58de5432a270f8"
+    },
+    {
+      "file": "build-fixtures.log",
+      "bytes": 1196,
+      "sha256": "0719be28a07ef219aebeffcbb307a05ebac6869a47575333c306f618213bc80b"
+    },
+    {
+      "file": "build-release.log",
+      "bytes": 3233,
+      "sha256": "1880872d61860af272bdcd87494720e9c467d1d73443c8bcd25c17b41f28e085"
+    },
+    {
+      "file": "comparison.html",
+      "bytes": 436240,
+      "sha256": "976230780cc46144971bc44747abb6fb574c111b2cfa14cee6a13bff05632947"
+    },
+    {
+      "file": "ctest.log",
+      "bytes": 3838,
+      "sha256": "6695408805245a8ab6661a01fcd92b59782dc7abe58065de86bf1836ba79f488"
+    },
+    {
+      "file": "interactions-after-1050.log",
+      "bytes": 216,
+      "sha256": "509034a60d8edd4bcc8cab7bc66878afdb5104bca34a1da83557ea7864404d64"
+    },
+    {
+      "file": "interactions-after-720.log",
+      "bytes": 229,
+      "sha256": "fd4023aa74f9ad8d12a5db1524716024a601005537d7f6796d00e621eeb0be2c"
+    },
+    {
+      "file": "interactions-before-1050.log",
+      "bytes": 216,
+      "sha256": "509034a60d8edd4bcc8cab7bc66878afdb5104bca34a1da83557ea7864404d64"
+    },
+    {
+      "file": "interactions-before-720.log",
+      "bytes": 229,
+      "sha256": "fd4023aa74f9ad8d12a5db1524716024a601005537d7f6796d00e621eeb0be2c"
+    },
+    {
+      "file": "resource-cycles.log",
+      "bytes": 282,
+      "sha256": "ca089d6a5213b63d23ba3853740bcc326e2137eaa221b10f6e0d94eb0dc18b1a"
+    },
+    {
+      "file": "resources-after-1050.json",
+      "bytes": 175,
+      "sha256": "b38ff1af10a03061d8e364689118e5c97de2ca7469ae0e0d0371922e277918d7"
+    },
+    {
+      "file": "resources-after-720.json",
+      "bytes": 174,
+      "sha256": "fe61149e1627a62748df16ef7117a46d1f4cac87d0c09540dd09fb12a5b59c81"
+    },
+    {
+      "file": "resources-before-1050.json",
+      "bytes": 175,
+      "sha256": "ef3d3df87e5ea89c895a4a7f7e074fb265bb7916d702ef381e18920c8ba5172d"
+    },
+    {
+      "file": "resources-before-720.json",
+      "bytes": 174,
+      "sha256": "6eafe413968f7549892863527a4a590442bc7202815415d418fb6b50a9b8fd8c"
+    }
+  ]
+}

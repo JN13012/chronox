@@ -1,0 +1,4 @@
+Resource cycles: handles 1070 -> 1070, GDI 15 -> 15, USER 32 -> 32
+Dashboard 100 hide/show cycles: handles=1070, GDI=15, USER=32, all stable
+Resource cycles: handles 1070 -> 1070, GDI 15 -> 15, USER 32 -> 32
+Dashboard 100 hide/show cycles: handles=1070, GDI=15, USER=32, all stable

@@ -1,0 +1,4 @@
+Native frame/icon and active/inactive DWM readback: PASS
+Page fits client: scrollbar correctly hidden
+Weekly scroll, rounded thumb drag and keyboard: PASS
+Inclusive native dates, reset and paint-only cache: PASS

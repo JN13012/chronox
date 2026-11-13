@@ -1,0 +1,65 @@
+Test project C:/Users/Cyber/Documents/WorkShop/Chronox/build
+      Start  1: chronox_ui_layout_tests
+ 1/30 Test  #1: chronox_ui_layout_tests .................   Passed    0.05 sec
+      Start  2: chronox_activity_storage_tests
+ 2/30 Test  #2: chronox_activity_storage_tests ..........   Passed    0.39 sec
+      Start  3: chronox_activity_tracker_tests
+ 3/30 Test  #3: chronox_activity_tracker_tests ..........   Passed    0.03 sec
+      Start  4: chronox_temporal_diagnostics_tests
+ 4/30 Test  #4: chronox_temporal_diagnostics_tests ......   Passed    1.20 sec
+      Start  5: temporal_baseline
+ 5/30 Test  #5: temporal_baseline .......................   Passed    0.07 sec
+      Start  6: temporal_forward
+ 6/30 Test  #6: temporal_forward ........................   Passed    0.06 sec
+      Start  7: temporal_backward
+ 7/30 Test  #7: temporal_backward .......................   Passed    0.06 sec
+      Start  8: temporal_midnight
+ 8/30 Test  #8: temporal_midnight .......................   Passed    0.05 sec
+      Start  9: temporal_midnight-offset
+ 9/30 Test  #9: temporal_midnight-offset ................   Passed    0.05 sec
+      Start 10: temporal_sleep-qpc-advances
+10/30 Test #10: temporal_sleep-qpc-advances .............   Passed    0.06 sec
+      Start 11: temporal_sleep-qpc-pauses
+11/30 Test #11: temporal_sleep-qpc-pauses ...............   Passed    0.05 sec
+      Start 12: temporal_resume-forward
+12/30 Test #12: temporal_resume-forward .................   Passed    0.06 sec
+      Start 13: temporal_resume-backward
+13/30 Test #13: temporal_resume-backward ................   Passed    0.05 sec
+      Start 14: temporal_restart
+14/30 Test #14: temporal_restart ........................   Passed    0.06 sec
+      Start 15: temporal_restart-future
+15/30 Test #15: temporal_restart-future .................   Passed    0.06 sec
+      Start 16: temporal_duplicates
+16/30 Test #16: temporal_duplicates .....................   Passed    0.07 sec
+      Start 17: chronox_temporal_storage_tests
+17/30 Test #17: chronox_temporal_storage_tests ..........   Passed    1.84 sec
+      Start 18: chronox_temporal_engine_tests
+18/30 Test #18: chronox_temporal_engine_tests ...........   Passed    0.03 sec
+      Start 19: chronox_core_tests
+19/30 Test #19: chronox_core_tests ......................   Passed    0.02 sec
+      Start 20: chronox_storage_tests
+20/30 Test #20: chronox_storage_tests ...................   Passed    0.84 sec
+      Start 21: chronox_dashboard_data_tests
+21/30 Test #21: chronox_dashboard_data_tests ............   Passed    2.31 sec
+      Start 22: chronox_widget_tests
+22/30 Test #22: chronox_widget_tests ....................   Passed    0.02 sec
+      Start 23: chronox_tray_activation_tests
+23/30 Test #23: chronox_tray_activation_tests ...........   Passed    0.22 sec
+      Start 24: chronox_activity_dashboard_tests
+24/30 Test #24: chronox_activity_dashboard_tests ........   Passed    6.40 sec
+      Start 25: chronox_titanium_style_tests
+25/30 Test #25: chronox_titanium_style_tests ............   Passed    0.05 sec
+      Start 26: chronox_titanium_interaction_tests
+26/30 Test #26: chronox_titanium_interaction_tests ......   Passed    6.59 sec
+      Start 27: chronox_activity_preferences_tests
+27/30 Test #27: chronox_activity_preferences_tests ......   Passed    0.04 sec
+      Start 28: chronox_windows_session_monitor_tests
+28/30 Test #28: chronox_windows_session_monitor_tests ...   Passed    0.09 sec
+      Start 29: chronox_windows_startup_tests
+29/30 Test #29: chronox_windows_startup_tests ...........   Passed    0.10 sec
+      Start 30: chronox_widget_preferences_tests
+30/30 Test #30: chronox_widget_preferences_tests ........   Passed    0.04 sec
+
+100% tests passed out of 30
+
+Total Test time (real) =  21.10 sec
