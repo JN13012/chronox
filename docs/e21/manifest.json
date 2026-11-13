@@ -1,0 +1,71 @@
+{
+  "codeCommit": "1e4fc59",
+  "clientDpi": 96,
+  "files": [
+    {
+      "file": "build-release.log",
+      "bytes": 2965,
+      "sha256": "e1b62aac0c7930f0ffa117b7c7dfa8b72285bb0c5cd589bb16a655594cbe857f"
+    },
+    {
+      "file": "build-review.log",
+      "bytes": 1116,
+      "sha256": "7d516d6f2e0eb7bbac5f86be3d45b4fbd99aac0bd2861ecda2cb6a6acb19cdf5"
+    },
+    {
+      "file": "ctest-committed.log",
+      "bytes": 3600,
+      "sha256": "1ca2d909c666387b6eb9b7b0395d54ce7a091664a825e3f6573b6dd06a43f105"
+    },
+    {
+      "file": "ctest-workspace.log",
+      "bytes": 3580,
+      "sha256": "dccd7400cf622df2905e6897417fe9f6de06449a93786e37b1ce4f78f93fcf87"
+    },
+    {
+      "file": "dashboard-1050x700-active.jpg",
+      "bytes": 70509,
+      "sha256": "5ac08ad44e590ab2101e537db06895822447d8053ba9e774b91465e3ad42b269"
+    },
+    {
+      "file": "dashboard-1050x700-inactive.jpg",
+      "bytes": 65433,
+      "sha256": "fe7392099e37fe190ed2d5b7236167144d1104364770c42f61720c299367ede6"
+    },
+    {
+      "file": "dashboard-720x520-active.jpg",
+      "bytes": 38716,
+      "sha256": "cdef6bf679c4119e97bf4db9a517758cbe0f1826cb3bbc5e4fa41251603e8fd5"
+    },
+    {
+      "file": "dashboard-720x520-focus-bottom.jpg",
+      "bytes": 44166,
+      "sha256": "595cdd5b1a9661007e4bbe62dd0c720f20ff3a3e85fbc92bc8273748f5128a97"
+    },
+    {
+      "file": "dashboard-720x520-inactive.jpg",
+      "bytes": 35298,
+      "sha256": "699489c24e6296b8faefd5e309dea78855dd41e532a348b13c15c70e41ac8f2d"
+    },
+    {
+      "file": "interaction-1050.log",
+      "bytes": 216,
+      "sha256": "509034a60d8edd4bcc8cab7bc66878afdb5104bca34a1da83557ea7864404d64"
+    },
+    {
+      "file": "interaction-720.log",
+      "bytes": 229,
+      "sha256": "fd4023aa74f9ad8d12a5db1524716024a601005537d7f6796d00e621eeb0be2c"
+    },
+    {
+      "file": "resources-1050.json",
+      "bytes": 174,
+      "sha256": "8e986f8de7beea9aad1bd10248c812d674adc4b20e120aaa4b4db89571a3bce0"
+    },
+    {
+      "file": "resources-720.json",
+      "bytes": 173,
+      "sha256": "5b48a98d717bc67d09b5d057d4bdb728fdc9996188cb1cf96c0802c3ff4f5583"
+    }
+  ]
+}

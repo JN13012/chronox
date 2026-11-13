@@ -1,0 +1,16 @@
+Version MSBuild 17.14.60+43b635718 pour .NET Framework
+
+  1>Checking Build System
+  chronox_sqlite.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_sqlite.lib
+  chronox_core.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_core.lib
+  chronox_storage.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_storage.lib
+  dashboard_window.cpp
+  chronox_dashboard_review.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_dashboard_review.exe
+Version MSBuild 17.14.60+43b635718 pour .NET Framework
+
+  1>Checking Build System
+  chronox_sqlite.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_sqlite.lib
+  chronox_core.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_core.lib
+  chronox_storage.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_storage.lib
+  dashboard_window.cpp
+  chronox_dashboard_smoke.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_dashboard_smoke.exe

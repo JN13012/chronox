@@ -1,0 +1,27 @@
+Version MSBuild 17.14.60+43b635718 pour .NET Framework
+
+  1>Checking Build System
+  chronox_sqlite.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_sqlite.lib
+  chronox_core.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_core.lib
+  chronox_ui_layout_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_ui_layout_tests.exe
+  chronox_widget_preferences_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_widget_preferences_tests.exe
+  chronox_widget_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_widget_tests.exe
+  chronox_windows_startup_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_windows_startup_tests.exe
+  chronox_core_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_core_tests.exe
+  chronox_temporal_diagnostics_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_temporal_diagnostics_tests.exe
+  chronox_windows_session_monitor_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_windows_session_monitor_tests.exe
+  chronox_activity_tracker_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_activity_tracker_tests.exe
+  chronox_activity_preferences_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_activity_preferences_tests.exe
+  chronox_temporal_engine_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_temporal_engine_tests.exe
+  chronox_tray_activation_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\tray-tests\Release\chronox_tray_activation_tests.exe
+  chronox_storage.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_storage.lib
+  chronox_temporal_scenarios.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_temporal_scenarios.exe
+  chronox_dashboard_data_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_dashboard_data_tests.exe
+  chronox_temporal_storage_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_temporal_storage_tests.exe
+  chronox_activity_storage_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_activity_storage_tests.exe
+  chronox_storage_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_storage_tests.exe
+  dashboard_window.cpp
+  dashboard_window.cpp
+  chronox_activity_dashboard_tests.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox_activity_dashboard_tests.exe
+  chronox.vcxproj -> C:\Users\Cyber\Documents\WorkShop\Chronox\build\src\Release\chronox.exe
+  Building Custom Rule C:/Users/Cyber/Documents/WorkShop/Chronox/CMakeLists.txt
