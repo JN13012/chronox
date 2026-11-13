@@ -1,164 +1,153 @@
 # Vision produit Chronox
 
-## Statut de ce document
+État documentaire : 13 novembre 2026. Les offres ci-dessous définissent une
+**cible produit**, sans annoncer leur disponibilité commerciale. La
+[roadmap](ROADMAP.md) porte les jalons, dépendances et critères d'acceptation,
+sans dates de livraison.
 
-Ce document distingue les capacités **implémentées**, les choix déjà
-**décidés**, les évolutions **proposées** et les sujets **à étudier**. Les
-éléments de roadmap ne constituent pas un engagement de livraison.
+## Positionnement et offres cibles
 
-## Vision
+Chronox vise une application Windows native, légère et internationale pour
+comprendre son temps, organiser ses projets et rendre compte du travail
+professionnel. Le fonctionnement personnel reste local et utilisable sans
+compte ni synchronisation obligatoire. La confidentialité et la maîtrise des
+données par la personne font partie du produit.
 
-Chronox est une application native Windows, développée en C++20, destinée au
-suivi du temps et de l’activité sur un ordinateur. Sa priorité initiale est
-d’être un outil personnel léger, local et respectueux de la vie privée.
+| Offre cible | Besoin et périmètre | Situation actuelle |
+|---|---|---|
+| **Chronox Personal** | Sessions, activité, historique, objectifs, statistiques et personnalisation. | Socle session/activité/historique implémenté ; objectifs et personnalisation étendue envisagés ; UX/UI, qualification et distribution à finaliser. |
+| **Chronox Pro** | Clients, projets, tâches, journal de travail modifiable, temps facturable, budgets, rapports, exports et Daily Reports automatiques. | Envisagé ; aucun module métier Pro identifié dans le dépôt. |
+| **Chronox Teams** | Multi-utilisateur, projets partagés, rapports collectifs, permissions, suivi des charges et synchronisation professionnelle facultative. | Envisagé ; aucun service d'équipe ni synchronisation implémentés. |
 
-À plus long terme, deux orientations pourraient être explorées :
+Pro s'appuierait sur le socle Personal ; Teams réutiliserait le modèle de
+travail Pro. Le jalon **Business** désigne budgets, rentabilité et facturation
+de Pro : il ne constitue pas une quatrième offre. Prix, licences, abonnements,
+quotas et frontières commerciales exactes restent ouverts.
 
-- **Chronox Personal** : suivi individuel, historique privé et outils de
-  compréhension de son temps ;
-- **Chronox Business** : éventuelle offre professionnelle pour des équipes,
-  sous réserve d’une étude approfondie des usages, des garanties et du cadre
-  légal.
+## Existant et niveau de validation
 
-Ces noms et orientations sont des propositions de travail, pas des produits ni
-des engagements commerciaux décidés.
+Analyse du README, de la SPEC, des sources et des rapports présents au dépôt.
+Les résultats ci-dessous sont **consignés dans ces rapports**, sans nouvelle
+exécution de l'application ou des tests pour cette mission documentaire.
+Implémentation, qualification isolée et déploiement sont des états distincts ;
+les rapports datés ne certifient pas l'état actuel du poste installé.
 
-## Ce que les durées signifient
+| Périmètre | État constaté et limites | Référence faisant autorité pour les détails |
+|---|---|---|
+| Temps de session et calendrier | Implémentés : durées monotones, périodes locales, incertitude explicite, historique. Correctif de cohérence des cumuls validé sur copies. Verrouillage/veille matériels ne sont pas certifiés par les simulations. | [SPEC](SPEC.md), [moteur temporel](TEMPORAL_ENGINE.md), [résultats du correctif](TEMPORAL_DURATION_FIX_RESULTS.md) |
+| Activité clavier/souris V3 | Implémentée : seuil configurable, désactivation, couverture et incertitudes distinctes. Validation isolée P1.3.4 : 26/26 suites PASS ; matériel et longue durée restent à qualifier. Aucune reconstruction de l'activité passée. | [Moteur d'activité](ACTIVITY_ENGINE.md), [résultats P1.3.4](P1.3.4_ACTIVITY_RESULTS.md) |
+| Persistance locale | SQLite V3 additive, checkpoints, récupération durable, sauvegarde cohérente et lecture historique ; migrations et invariants testés sur copies. Aucun modèle clients/projets/tâches ou déclarations de travail. | [Moteur d'activité — SQLite V3](ACTIVITY_ENGINE.md#sqlite-v3) |
+| Application native | Widget, zone de notification, dashboard, navigation, historique graphique et paramètres d'activité implémentés. Installation locale et démarrage Windows optionnel documentés ; aucun installateur public distribué. | [README](../README.md), [dashboard adaptatif](UI_RESPONSIVE_DASHBOARD.md) |
+| UX/UI en cours de finalisation | E2.1 implémenté et revu sur fixtures ; Titanium E2.2 est un prototype isolé de Vue générale, non généralisé. E2.2 consigne 30/30 suites PASS et des contrôles visuels ciblés ; approbation artistique finale, DPI physiques 150/200 %, lecteur d'écran complet et longue durée restent ouverts. | [Revue E2.1](E2_1_NATIVE_FINISH_REVIEW.md), [prototype E2.2](E2_2_TITANIUM_PROTOTYPE.md) |
+| Fonctions futures | Objectifs, statistiques avancées, personnalisation étendue, internationalisation complète, Pro, Teams et intégrations : envisagés, sans disponibilité annoncée. | [Roadmap](ROADMAP.md) |
 
-Chronox doit distinguer explicitement des mesures de nature différente :
+Les anciennes mentions « console uniquement » de la vision et de la roadmap
+sont remplacées par cet état. Les spécifications et rapports historiques
+conservent leur portée de version ; ce document ne recopie pas leurs règles
+techniques ni leurs protocoles de test.
 
-1. **Temps de session** — durée pendant laquelle une session Windows est
-   déverrouillée et l’ordinateur éveillé simultanément. C’est la mesure
-   actuellement implémentée. Elle ne prouve ni présence humaine continue, ni
-   activité professionnelle.
-2. **Activité applicative** — informations temporelles sur les applications
-   au premier plan. Cette capacité est proposée pour une version future ; elle
-   n’est pas encore implémentée et pourrait révéler des informations
-   sensibles.
-3. **Temps de travail déclaré** — durée qu’une personne choisit de déclarer
-   comme travail, par exemple pour un projet ou une tâche. Cette déclaration
-   aurait un sens distinct des mesures automatiques. Elle n’est pas
-   implémentée et son modèle fonctionnel reste à étudier.
+### Architecture et dépendances actuelles
 
-Ces données ne doivent pas être fusionnées ni présentées comme des preuves
-équivalentes. Une durée de session ou d’application ne doit jamais être
-qualifiée automatiquement de temps de travail réellement effectué.
+- `src/core` : transitions, horloges, calendrier et activité ; règles métier
+  séparées de Win32. `src/storage` : persistance SQLite et requêtes historiques.
+- `src/windows` : événements WTS/alimentation, source de dernière entrée,
+  préférences HKCU, widget et dashboard dans un même processus. Win32,
+  Direct2D/DirectWrite, WIC et DWM constituent l'interface actuelle.
+- C++20, CMake 3.24+, MSVC/Visual Studio 2022 et SDK Windows pour l'application ;
+  SQLite 3.54.1 liée statiquement, source et empreinte fixées dans CMake.
+  Le runtime MSVC et les ressources `assets/ui` font partie des besoins de
+  distribution décrits dans le README. Le noyau et le stockage sont testables
+  hors Windows ; cela ne constitue pas un portage de l'application.
+- Aucun serveur ni service cloud requis. Les nouveaux modèles métier,
+  exports, identités, permissions et échanges réseau restent à concevoir.
+  La présentation actuelle est française, avec notamment une locale `fr-FR` ;
+  une offre internationale n'est pas déjà disponible.
 
-## Principes de conception
+## Quatre notions de temps à garder séparées
 
-- **Performance** : faible consommation CPU, mémoire et disque au repos ;
-  traitements et actualisations limités au nécessaire.
-- **Modularité** : séparer les règles métier, la persistance et les intégrations
-  propres à Windows.
-- **Fiabilité** : rendre les transitions et les limites de mesure explicites,
-  préserver les données et signaler les erreurs sans les masquer.
-- **Transparence** : expliquer ce qui est mesuré, à quel moment, et les limites
-  d’interprétation des résultats.
-- **Contrôle des données** : privilégier le stockage local, documenter toute
-  collecte ou synchronisation éventuelle et laisser à la personne le contrôle
-  des données qui la concernent.
+| Notion | Sens | Limite d'interprétation |
+|---|---|---|
+| **Temps de session** | Durée mesurée pendant que Windows est éveillé et déverrouillé, lors de l'exécution de Chronox. | Ne prouve ni présence continue ni travail effectué. |
+| **Activité clavier/souris** | Durée classée active à partir de la dernière entrée Windows et du seuil d'inactivité, grâce incluse ; bornée par le temps de session. | Ne mesure pas la productivité ; lecture, réflexion et réunions peuvent ne produire aucune entrée. Détection désactivée : suit prospectivement la session, avec mode explicite. |
+| **Travail déclaré** | Futur journal modifiable : durée et description choisies par la personne, affectées à un projet ou une tâche. | Déclaration distincte des mesures ; peut inclure du travail hors ordinateur. Une correction ne réécrit jamais les mesures brutes. |
+| **Heures facturables** | Future part du travail déclaré retenue selon les règles du projet/client et une validation explicite. | Ni une session ni une interaction ne deviennent automatiquement facturables ; règles d'arrondi et de tarification à définir. |
 
-## Interface proposée
+L'absence de mesure reste distincte d'un zéro mesuré ; une couverture partielle
+ne doit pas devenir une journée complète par extrapolation. Le suivi éventuel
+d'applications au premier plan est une piste séparée, non implémentée et non
+nécessaire aux Daily Reports de base.
 
-La version actuelle est une application console ; aucune interface graphique
-n’est implémentée. Une référence artistique a été sélectionnée pour le
-prototype V0.4 : chronomètre en titane sombre, accents bleus et cadran
-circulaire. Elle ne constitue pas un choix de ressources de production ni une
-validation de l’architecture graphique. Les exigences et questions ouvertes
-sont détaillées dans la [spécification UI V0.4](./UI_SPEC.md).
+## Daily Reports et confidentialité — fonctionnement futur
 
-### Widget flottant compact
+Ce parcours est envisagé pour Pro, puis pour les usages partagés de Teams.
+Il ne décrit aucune automatisation déjà livrée et n'impose pas de service d'IA.
 
-La cible V0.4 décrit un widget facultatif, compact et déplaçable, avec des
-états rétracté, compact et agrandi. Son intégration et ses interactions restent
-à prototyper ; les tailles indiquées par la spécification UI sont indicatives.
+1. **Collecter localement le nécessaire** : réutiliser les durées et leur qualité,
+   les affectations choisies et le journal déclaré. Rendre la collecte visible
+   et contrôlable. Ne pas étendre implicitement les données capturées.
+2. **Affecter aux projets et tâches** : la personne choisit ou corrige les
+   affectations ; les suggestions éventuelles restent explicables et
+   facultatives. Les plages non affectées et les chevauchements sont signalés.
+3. **Générer automatiquement un brouillon quotidien** : synthèse du travail
+   déclaré, projets/tâches et durées autorisées. Identifier les sources, les
+   manques et le statut brouillon, sans inventer de travail ni de facturation.
+4. **Faire modifier et valider par le collaborateur** : il peut corriger le
+   journal et le texte, retirer des éléments privés et prévisualiser le rapport.
+   Les corrections restent séparées des mesures d'origine ; une modification
+   après validation impose une nouvelle validation avant repartage.
+5. **Partager les seules informations professionnelles autorisées** : choix
+   explicite du contenu et des destinataires, après validation. Aucun envoi
+   automatique d'un brouillon ou d'un historique personnel brut. Sans
+   synchronisation, conserver localement le rapport ou l'exporter volontairement.
+6. **Produire les rapports d'équipe selon les droits** : accès limités aux
+   projets et personnes autorisés, agrégats de travail validé et charges
+   déclarées/prévues. Ne pas convertir les interactions clavier/souris en
+   indicateur de performance individuelle.
 
-### Widget étendu et application principale
+La mesure actuelle ne stocke ni touches, ni positions de souris, ni titres de
+fenêtres, ni contenus. Les bornes d'activité et les sauvegardes peuvent cependant
+révéler des périodes d'interaction : elles restent des données personnelles
+sensibles à protéger, même locales. Voir les limites dans
+[ACTIVITY_ENGINE.md](ACTIVITY_ENGINE.md#confidentialité).
 
-Un mode plus développé pourrait combiner des statistiques rapides, l’état de
-session et l’accès à l’application principale. La relation exacte entre widget
-et fenêtre principale reste à définir.
+Teams est un outil de coordination du travail, **pas un système de surveillance
+permanente des employés**. Exclure surveillance cachée, keylogging, captures
+permanentes, remontée continue des états individuels et classement de
+productivité déduit de l'activité. Un responsable n'obtient pas, par son seul
+rôle, l'accès à l'historique personnel détaillé.
 
-### Dashboard complet
+La synchronisation professionnelle reste facultative, limitée à un espace
+professionnel explicite et aux données autorisées. Avant sa réalisation,
+définir identité, séparation personnel/professionnel, permissions, sécurité des
+échanges et du stockage, conservation, export, suppression et traçabilité des
+accès/partages. Le retrait d'accès ne peut pas promettre d'effacer une copie
+déjà exportée chez un destinataire.
 
-Une vue approfondie pourrait présenter l’historique, des graphiques, un
-calendrier ainsi que des répartitions par applications et par périodes. La
-répartition par application dépendrait de la mise en œuvre préalable du suivi
-applicatif et de choix explicites sur les données conservées.
+**Avant toute commercialisation dans un marché**, prévoir une analyse juridique
+locale par des spécialistes : protection des données, droit du travail,
+information et consultation applicables, bases légales, proportionnalité,
+conservation, transferts et hébergement, droits des personnes ; ajouter les
+exigences comptables/fiscales pour la facturation. Ce sont des sujets à analyser,
+pas une garantie de conformité ni un avis juridique. Les rôles de traitement et
+les responsabilités entre Chronox et les organisations restent à définir.
 
-### Piste technique
+## Décisions produit encore ouvertes
 
-Une interface native Win32 utilisant Direct2D et DirectWrite est une piste
-technique à valider par un prototype, notamment pour l’accessibilité, la
-maintenance, les performances et les besoins réels de rendu. Cette piste
-n’est pas une décision d’architecture définitive. La référence artistique
-sert de cible de conception, mais les ressources finales, les dimensions,
-l’apparence détaillée et les interactions restent à valider.
+- Publics et cas d'usage prioritaires ; frontières gratuites/payantes, licences,
+  prix, support et engagement de maintenance par offre.
+- Marchés/langues de lancement ; formats de dates, semaines, fuseaux et monnaies
+  à supporter. Préserver les durées V3 et les invariants calendaires existants.
+- Validation finale UX/UI, éventuelle adoption de Titanium, objectifs personnels
+  et niveau de personnalisation ; aucun choix de thème imposé par cette vision.
+- Affectation manuelle ou assistée, règles de correction et validation du journal,
+  distinction estimation/budget/réalisé, temps facturable et arrondis.
+- Formats d'export, contenu et déclenchement des Daily Reports ; automatisation
+  locale par règles ou assistance facultative, sans partage implicite des données.
+- Factures natives ou intégration à un outil spécialisé ; monnaies, taxes et
+  exigences par marché avant engagement commercial.
+- Modèle d'identité et de permissions Teams, hébergement/synchronisation,
+  fonctionnement hors ligne, conflits et périmètre exact des charges partagées.
 
-## Données et confiance
-
-### Implémenté
-
-- Mesure locale du temps pendant lequel la session courante est déverrouillée
-  et le PC éveillé, pendant l’exécution de Chronox.
-- Persistance dans SQLite sous `%LOCALAPPDATA%\Chronox\chronox.db`.
-- Rapports calendaires locaux par jour, semaine, mois et année.
-- Aucun serveur, service cloud ou suivi des applications au premier plan dans
-  le périmètre actuel.
-
-### Décidé
-
-- Conserver pour le périmètre initial une application Windows native, sans
-  serveur ni service cloud requis.
-- Ne pas compter les périodes pendant lesquelles Chronox ne fonctionne pas ;
-  après un arrêt inattendu, récupérer au plus le dernier point de sauvegarde
-  durable.
-- Garder séparés le temps de session, une éventuelle mesure d’activité
-  applicative et tout temps de travail déclaré.
-
-Pour le comportement détaillé déjà validé, voir la
-[spécification V0](./SPEC.md).
-
-## Perspective professionnelle — sujets à étudier
-
-Une éventuelle offre Business nécessiterait une étude dédiée avant tout
-développement ou déploiement. Elle devrait notamment examiner :
-
-- les finalités et la base légale applicables au traitement, ainsi que les
-  obligations du RGPD ;
-- les recommandations et les formalités ou ressources applicables de la CNIL ;
-- la nécessité et la proportionnalité de chaque donnée suivie au regard de la
-  finalité annoncée ;
-- l’information préalable, compréhensible et effective des salariés ;
-- les rôles et les modalités d’accès aux données par la personne concernée,
-  l’employeur, les responsables et les administrateurs ;
-- les durées de conservation, la suppression et l’export des données ;
-- les mesures de sécurité, le contrôle des accès, le chiffrement éventuel, la
-  traçabilité et la gestion des incidents ;
-- la distinction entre suivi du temps, activité d’un poste et évaluation du
-  travail, ainsi que les risques de réutilisation des données.
-
-Cette liste est une première grille de questions, pas un avis juridique ni une
-garantie de conformité. Les exigences devraient être précisées avec des
-spécialistes compétents et les parties concernées avant de définir une offre.
-
-**Limite de conception :** Chronox ne prévoit pas de surveillance cachée, de
-capture d’écran permanente ni de keylogging. Toute évolution du périmètre de
-données devrait être explicite, justifiée, proportionnée et soumise à une
-révision de ses garanties de confidentialité.
-
-## Questions ouvertes
-
-- Quels besoins personnels justifient une interface graphique et quel est le
-  meilleur parcours entre widget compact, mode étendu et dashboard ?
-- Quelle technologie d’interface répond aux besoins sans alourdir l’application
-  ni sa maintenance ?
-- Quelles données d’activité applicative seraient réellement utiles, visibles
-  par la personne et conservées localement ?
-- Faut-il permettre une déclaration manuelle de travail, et comment l’afficher
-  sans la confondre avec le temps de session ou l’activité mesurée ?
-- Existe-t-il un besoin réel pour une offre Business, et quelles garanties
-  seraient nécessaires avant de l’envisager ?
-
-Ces questions restent ouvertes jusqu’à validation par des besoins utilisateurs,
-des prototypes et, pour l’usage professionnel, une étude spécifique.
+Cette mise à jour est documentaire : elle préserve Chronox V3, les calculs,
+SQLite, les préférences et les travaux UX/UI. Elle n'autorise aucune migration,
+installation ou généralisation du prototype.
