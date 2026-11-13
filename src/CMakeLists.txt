@@ -77,6 +77,7 @@ if(WIN32)
         Windowscodecs
         D2d1
         Dwrite
+        Dwmapi
         Comctl32
         Mincore
     )
@@ -189,13 +190,13 @@ if(BUILD_TESTING)
         set_tests_properties(chronox_tray_activation_tests PROPERTIES TIMEOUT 20)
         add_executable(chronox_activity_dashboard_tests tests/activity_dashboard_tests.cpp windows/dashboard_window.cpp windows/dashboard_data.cpp windows/chronox.rc)
         target_include_directories(chronox_activity_dashboard_tests PRIVATE "${PROJECT_SOURCE_DIR}")
-        target_link_libraries(chronox_activity_dashboard_tests PRIVATE chronox_storage User32 D2d1 Dwrite Comctl32 Ole32)
+        target_link_libraries(chronox_activity_dashboard_tests PRIVATE chronox_storage User32 D2d1 Dwrite Dwmapi Comctl32 Ole32)
         target_compile_definitions(chronox_activity_dashboard_tests PRIVATE UNICODE _UNICODE NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
         add_test(NAME chronox_activity_dashboard_tests COMMAND chronox_activity_dashboard_tests)
         set_tests_properties(chronox_activity_dashboard_tests PROPERTIES TIMEOUT 20)
         add_executable(chronox_dashboard_review EXCLUDE_FROM_ALL tests/dashboard_review.cpp windows/dashboard_window.cpp windows/dashboard_data.cpp windows/chronox.rc)
         target_include_directories(chronox_dashboard_review PRIVATE "${PROJECT_SOURCE_DIR}")
-        target_link_libraries(chronox_dashboard_review PRIVATE chronox_storage User32 D2d1 Dwrite Comctl32 Ole32 Psapi)
+        target_link_libraries(chronox_dashboard_review PRIVATE chronox_storage User32 D2d1 Dwrite Dwmapi Comctl32 Ole32 Psapi)
         target_compile_definitions(chronox_dashboard_review PRIVATE UNICODE _UNICODE NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
         add_executable(chronox_activity_resource_probe EXCLUDE_FROM_ALL tests/activity_resource_probe.cpp windows/windows_time_source.cpp windows/windows_input_source.cpp)
         target_link_libraries(chronox_activity_resource_probe PRIVATE chronox_storage User32 Psapi Mincore)
@@ -219,6 +220,7 @@ if(BUILD_TESTING)
             User32
             D2d1
             Dwrite
+            Dwmapi
             Comctl32
         )
         target_compile_features(chronox_dashboard_smoke PRIVATE cxx_std_20)

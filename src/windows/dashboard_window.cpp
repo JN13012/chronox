@@ -7,6 +7,7 @@
 #include "dashboard_text_selection.h"
 #include "ui_text.h"
 #include "ui_scrollbar.h"
+#include "ui_native_frame.h"
 
 #include <windows.h>
 #include "ui_window_geometry.h"
@@ -503,6 +504,8 @@ struct DashboardWindow::Impl {
         if (window == nullptr) {
             throw windowsError("CreateWindowExW(dashboard)", GetLastError());
         }
+
+        ui::applyDashboardFrame(window, GetActiveWindow() == window);
 
         calendarWindow = CreateWindowExW(
             WS_EX_TOPMOST, MONTHCAL_CLASSW, L"",
@@ -2239,6 +2242,14 @@ struct DashboardWindow::Impl {
     LRESULT handleWindowMessage(HWND hwnd, UINT message, WPARAM wParam,
                                 LPARAM lParam) {
         switch (message) {
+        case WM_ACTIVATE:
+            ui::applyDashboardFrame(hwnd, LOWORD(wParam) != WA_INACTIVE);
+            return DefWindowProcW(hwnd, message, wParam, lParam);
+        case WM_THEMECHANGED:
+        case WM_SETTINGCHANGE:
+        case WM_DWMCOMPOSITIONCHANGED:
+            ui::applyDashboardFrame(hwnd, GetActiveWindow() == hwnd);
+            return DefWindowProcW(hwnd, message, wParam, lParam);
         case WM_GETMINMAXINFO: {
             auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
             const HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
