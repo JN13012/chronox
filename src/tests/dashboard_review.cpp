@@ -7,6 +7,7 @@
 #include <cmath>
 #include "../windows/ui_window_geometry.h"
 #include "../windows/ui_scrollbar.h"
+#include "../windows/ui_native_frame.h"
 #include <psapi.h>
 #include <objbase.h>
 #include <algorithm>
@@ -162,6 +163,57 @@ int main(int argc, char** argv) try {
     if (!seconds) {
         while (IsWindowVisible(own)) { pump(); std::this_thread::sleep_for(10ms); }
     } else {
+        // Native DWM frame and style checks; no global desktop settings change.
+        const auto style=GetWindowLongPtrW(own,GWL_STYLE);
+        constexpr LONG_PTR nativeStyle=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_MINIMIZEBOX|WS_MAXIMIZEBOX;
+        if ((style&nativeStyle)!=nativeStyle || (style&WS_VSCROLL) || !GetClassLongPtrW(own,GCLP_HICON))
+            throw std::runtime_error("Native frame, icon or page scrollbar style regressed");
+        for (const bool active : {false,true}) {
+            SendMessageW(own,WM_ACTIVATE,active?WA_ACTIVE:WA_INACTIVE,0);
+            COLORREF caption{};
+            if (SUCCEEDED(DwmGetWindowAttribute(own,DWMWA_CAPTION_COLOR,&caption,sizeof(caption))) &&
+                !ui::highContrastEnabled() && caption!=ui::nativeColor(active?ui::palette::sidebar:ui::palette::background))
+                throw std::runtime_error("Active/inactive DWM caption color mismatch");
+        }
+        SendMessageW(own,WM_ACTIVATE,GetActiveWindow()==own?WA_ACTIVE:WA_INACTIVE,0);
+        std::cout << "Native frame/icon and active/inactive DWM readback: PASS\n";
+        const auto pageScroll=GetDlgItem(own,3302);
+        select(0); pump();
+        if (IsWindowVisible(pageScroll)) {
+            const auto position=[&] { SCROLLINFO i{sizeof(SCROLLINFO),SIF_ALL}; GetScrollInfo(pageScroll,SB_CTL,&i); return i; };
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_HOME,0); pump();
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_NEXT,0); pump();
+            if(position().nPos<=0) throw std::runtime_error("PageDown did not scroll page");
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_PRIOR,0); pump();
+            if(position().nPos!=0) throw std::runtime_error("PageUp did not restore page");
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_END,0); pump();
+            auto i=position();
+            if(i.nPos!=i.nMax-static_cast<int>(i.nPage)+1) throw std::runtime_error("End missed page bottom");
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_HOME,0); pump(); i=position();
+            RECT r{}; GetClientRect(pageScroll,&r);
+            const auto g=ui::sessionScrollGeometry(r.bottom*96.f/dpi,i.nMax+1,i.nPage,i.nPos);
+            const int x=r.right/2, first=static_cast<int>(std::lround((g.thumbTop+g.thumbHeight/2)*dpi/96)),
+                last=static_cast<int>(std::lround((g.trackBottom-g.thumbHeight/2)*dpi/96));
+            SendMessageW(pageScroll,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,first));
+            SendMessageW(pageScroll,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,last));
+            SendMessageW(pageScroll,WM_LBUTTONUP,0,MAKELPARAM(x,last)); pump();
+            i=position();
+            if(i.nPos!=i.nMax-static_cast<int>(i.nPage)+1 || GetCapture()==pageScroll)
+                throw std::runtime_error("Page thumb drag failed");
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_HOME,0); pump();
+            SendMessageW(pageScroll,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,r.bottom-3));
+            SendMessageW(pageScroll,WM_LBUTTONUP,0,MAKELPARAM(x,r.bottom-3)); pump();
+            if(position().nPos<=0) throw std::runtime_error("Page rail click failed");
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_HOME,0); pump();
+            POINT pt{0,0}; ClientToScreen(own,&pt);
+            SendMessageW(own,WM_MOUSEWHEEL,MAKEWPARAM(0,static_cast<WORD>(-WHEEL_DELTA)),MAKELPARAM(pt.x,pt.y+190)); pump();
+            if(position().nPos<=0) throw std::runtime_error("Page mouse wheel failed");
+            SetFocus(pageScroll);
+            if(GetFocus()!=pageScroll) throw std::runtime_error("Page scrollbar cannot receive keyboard focus");
+            SendMessageW(pageScroll,WM_KEYDOWN,VK_ESCAPE,0); pump();
+            if(GetFocus()!=own) throw std::runtime_error("Page scrollbar trapped keyboard focus");
+            std::cout << "Page rail/drag/wheel/PageUp/PageDown/Home/End/focus: PASS\n";
+        } else std::cout << "Page fits client: scrollbar correctly hidden\n";
         // Test only this fixture's own native controls; no production data or settings.
         select(0); pump();
         SendMessageW(own,WM_VSCROLL,SB_BOTTOM,0); pump();
@@ -169,9 +221,9 @@ int main(int argc, char** argv) try {
         SCROLLINFO listInfo{sizeof(SCROLLINFO),SIF_ALL},mainInfo{sizeof(SCROLLINFO),SIF_POS};
         if(!listScroll || !IsWindowVisible(listScroll) || !GetScrollInfo(listScroll,SB_CTL,&listInfo) || listInfo.nMax<50)
             throw std::runtime_error("Weekly scrollbar is missing or sessions are truncated");
-        GetScrollInfo(own,SB_VERT,&mainInfo); const auto mainPosition=mainInfo.nPos;
+        GetScrollInfo(GetDlgItem(own,3302),SB_CTL,&mainInfo); const auto mainPosition=mainInfo.nPos;
         SendMessageW(own,WM_VSCROLL,SB_BOTTOM,reinterpret_cast<LPARAM>(listScroll)); pump();
-        GetScrollInfo(listScroll,SB_CTL,&listInfo); GetScrollInfo(own,SB_VERT,&mainInfo);
+        GetScrollInfo(listScroll,SB_CTL,&listInfo); GetScrollInfo(GetDlgItem(own,3302),SB_CTL,&mainInfo);
         if(listInfo.nPos!=listInfo.nMax-static_cast<int>(listInfo.nPage)+1 || mainInfo.nPos!=mainPosition)
             throw std::runtime_error("Weekly scrollbar must reach the final row without scrolling the dashboard");
         SendMessageW(own,WM_VSCROLL,SB_TOP,reinterpret_cast<LPARAM>(listScroll)); pump();
@@ -185,7 +237,7 @@ int main(int argc, char** argv) try {
         SendMessageW(listScroll,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,firstY));
         SendMessageW(listScroll,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,lastY));
         SendMessageW(listScroll,WM_LBUTTONUP,0,MAKELPARAM(x,lastY)); pump();
-        GetScrollInfo(listScroll,SB_CTL,&listInfo); GetScrollInfo(own,SB_VERT,&mainInfo);
+        GetScrollInfo(listScroll,SB_CTL,&listInfo); GetScrollInfo(GetDlgItem(own,3302),SB_CTL,&mainInfo);
         if(listInfo.nPos!=listInfo.nMax-static_cast<int>(listInfo.nPage)+1 || mainInfo.nPos!=mainPosition || GetCapture()==listScroll)
             throw std::runtime_error("Rounded scroll drag failed or moved the dashboard");
         SendMessageW(listScroll,WM_KEYDOWN,VK_HOME,0); pump(); GetScrollInfo(listScroll,SB_CTL,&listInfo);

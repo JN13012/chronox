@@ -8,6 +8,7 @@
 #include "ui_text.h"
 #include "ui_scrollbar.h"
 #include "ui_native_frame.h"
+#include "ui_page_scrollbar.h"
 
 #include <windows.h>
 #include "ui_window_geometry.h"
@@ -380,6 +381,7 @@ struct DashboardWindow::Impl {
     ComPtr<IDWriteTextFormat> activityFormat;
     std::array<float, 3> contentScroll{};
     float maximumContentScroll{};
+    ui::PageScrollbar pageScrollbar;
     bool settingsNavigationReturn{};
     ui::DashboardTextSelection textSelection;
     D2D1_RECT_F textClip{};
@@ -478,7 +480,7 @@ struct DashboardWindow::Impl {
                               static_cast<int>(dpi), 96),
                        MulDiv(static_cast<int>(InitialClientHeight),
                               static_cast<int>(dpi), 96)};
-        if (!ui::adjustClientRectForDpi(&outerRect, WS_OVERLAPPEDWINDOW | WS_VSCROLL, FALSE, 0,
+        if (!ui::adjustClientRectForDpi(&outerRect, WS_OVERLAPPEDWINDOW, FALSE, 0,
                                       dpi)) {
             throw windowsError("ui::adjustClientRectForDpi(dashboard)",
                                GetLastError());
@@ -499,13 +501,17 @@ struct DashboardWindow::Impl {
                           2;
         window = CreateWindowExW(
             0, DashboardClassName, L"Chronox - Tableau de bord",
-            WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_CLIPCHILDREN, x, y, width, height, nullptr, nullptr,
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, x, y, width, height, nullptr, nullptr,
             GetModuleHandleW(nullptr), this);
         if (window == nullptr) {
             throw windowsError("CreateWindowExW(dashboard)", GetLastError());
         }
 
         ui::applyDashboardFrame(window, GetActiveWindow() == window);
+
+        pageScrollbar.scroll = [this](int action, int position) { scrollPage(action, position); };
+        pageScrollbar.failure = [this] { handleMessageError(); };
+        pageScrollbar.create(window, d2dFactory.Get());
 
         calendarWindow = CreateWindowExW(
             WS_EX_TOPMOST, MONTHCAL_CLASSW, L"",
@@ -1083,7 +1089,7 @@ struct DashboardWindow::Impl {
         recentScrollBrush->SetColor(color(ui::palette::hover));
         recentScrollTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(center-1,geometry.trackTop,
             center+1,geometry.trackBottom),1,1),recentScrollBrush.Get());
-        recentScrollBrush->SetColor(color(highlighted?ui::palette::cyan:ui::palette::border));
+        recentScrollBrush->SetColor(color(highlighted?ui::Rgb{0x91,0xa8,0xbb}:ui::Rgb{0x62,0x78,0x8c}));
         recentScrollTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(center-halfWidth,geometry.thumbTop,
             center+halfWidth,geometry.thumbTop+geometry.thumbHeight),halfWidth,halfWidth),recentScrollBrush.Get());
         const auto result=recentScrollTarget->EndDraw();
@@ -2017,6 +2023,17 @@ struct DashboardWindow::Impl {
         return DefSubclassProc(hwnd,msg,w,l);
     }
 
+    void scrollPage(int action, int position = 0) {
+        if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION)
+            scrollContent(static_cast<float>(position)-contentScroll[static_cast<std::size_t>(activePage)]);
+        else if (action == SB_TOP) scrollContent(-maximumContentScroll);
+        else if (action == SB_BOTTOM) scrollContent(maximumContentScroll);
+        else if (action == SB_LINEUP) scrollContent(-32);
+        else if (action == SB_LINEDOWN) scrollContent(32);
+        else if (action == SB_PAGEUP) scrollContent(-240);
+        else if (action == SB_PAGEDOWN) scrollContent(240);
+    }
+
     void scrollContent(float delta) {
         auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
         scroll = std::clamp(scroll + delta, 0.f, maximumContentScroll);
@@ -2068,16 +2085,11 @@ struct DashboardWindow::Impl {
             ? ui::DashboardLayout::overviewHeight(contentWidth-28,overviewCardSizing(contentWidth-28).height(),
                 size.height,overviewCardSizing(contentWidth-28).columns)
             : activePage == DashboardPage::History ? ui::DashboardLayout::historyHeight : 318.f;
-        maximumContentScroll = std::max(0.f, required - available);
+        maximumContentScroll = static_cast<float>(std::max(0, static_cast<int>(std::ceil(required))-static_cast<int>(available)));
         auto& scroll = contentScroll[static_cast<std::size_t>(activePage)];
         scroll = std::clamp(scroll, 0.f, maximumContentScroll);
-        SCROLLINFO info{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL};
-        info.nMin = 0; info.nMax = static_cast<int>(required) - 1;
-        info.nPage = static_cast<UINT>(available); info.nPos = static_cast<int>(scroll);
-        SCROLLINFO previous{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS};
-        GetScrollInfo(window, SB_VERT, &previous);
-        if (previous.nMax != info.nMax || previous.nPage != info.nPage || previous.nPos != info.nPos)
-            SetScrollInfo(window, SB_VERT, &info, TRUE);
+        pageScrollbar.update(dpi, size.width-2, panelTop, panelBottom,
+            static_cast<int>(std::ceil(required)), static_cast<int>(available), static_cast<int>(scroll));
         layoutActivityControls(activePage==DashboardPage::Settings,contentLeft+24,contentRight-24);
         struct ContentScope {
             ID2D1RenderTarget* target;
@@ -2261,7 +2273,7 @@ struct DashboardWindow::Impl {
             }
             RECT minimum{0, 0, MulDiv(640, static_cast<int>(dpi), 96),
                          MulDiv(420, static_cast<int>(dpi), 96)};
-            if (!ui::adjustClientRectForDpi(&minimum, WS_OVERLAPPEDWINDOW | WS_VSCROLL, FALSE, 0,
+            if (!ui::adjustClientRectForDpi(&minimum, WS_OVERLAPPEDWINDOW, FALSE, 0,
                                           dpi)) {
                 throw windowsError("ui::adjustClientRectForDpi(dashboard minimum)",
                                    GetLastError());
@@ -2408,17 +2420,9 @@ struct DashboardWindow::Impl {
         case WM_VSCROLL: {
             const int action = LOWORD(wParam);
             if(reinterpret_cast<HWND>(lParam)==recentScrollbar && recentScrollbar) { scrollRecentSessions(action); return 0; }
-            if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) {
-                SCROLLINFO info{sizeof(SCROLLINFO), SIF_TRACKPOS};
-                GetScrollInfo(hwnd, SB_VERT, &info);
-                contentScroll[static_cast<std::size_t>(activePage)] = static_cast<float>(info.nTrackPos);
-                render();
-            } else if (action == SB_TOP) scrollContent(-maximumContentScroll);
-            else if (action == SB_BOTTOM) scrollContent(maximumContentScroll);
-            else if (action == SB_LINEUP) scrollContent(-32);
-            else if (action == SB_LINEDOWN) scrollContent(32);
-            else if (action == SB_PAGEUP) scrollContent(-240);
-            else if (action == SB_PAGEDOWN) scrollContent(240);
+            SCROLLINFO info{sizeof(SCROLLINFO), SIF_TRACKPOS};
+            if (pageScrollbar.window) GetScrollInfo(pageScrollbar.window, SB_CTL, &info);
+            scrollPage(action, info.nTrackPos);
             return 0;
         }
         case WM_MOUSEWHEEL: {
@@ -2454,6 +2458,10 @@ struct DashboardWindow::Impl {
             return 0;
         }
         case WM_KEYDOWN:
+            if (wParam==VK_F6 && pageScrollbar.window && IsWindowVisible(pageScrollbar.window) &&
+                (GetKeyState(VK_SHIFT)&0x8000)) { SetFocus(pageScrollbar.window); return 0; }
+            if (wParam==VK_HOME && activePage!=DashboardPage::History) { scrollPage(SB_TOP); return 0; }
+            if (wParam==VK_END) { scrollPage(SB_BOTTOM); return 0; }
             if (wParam==VK_F6 && activePage==DashboardPage::Overview && recentScrollbarVisible) { SetFocus(recentScrollbar); return 0; }
             if (wParam == VK_F1) { showMetricDefinitions(); return 0; }
             if (wParam == VK_F2 && activePage==DashboardPage::Overview) { showWeekDetails(); return 0; }
