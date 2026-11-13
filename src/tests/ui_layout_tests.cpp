@@ -189,15 +189,24 @@ int main() try {
         if (FAILED(createMetricLayout(factory.Get(),huge[0],card-24,expanded.valueHeight,&expandedText)))
             throw std::runtime_error("Expanded total cannot fit");
         checkAnnotation(hugeActivity[0],type::activity,card-24,expanded.activityHeight);
-        const std::wstring totals[]{L"7:11:15",L"31:37:17",L"80:07:46",L"85:34:34"};
-        const std::wstring inputs[]{L"Clavier/souris : 5:29:59",L"Clavier/souris : 8:54:31"};
+        const std::wstring totals[]{L"31:37:17",L"80:07:46",L"85:34:34"};
+        const std::wstring inputs[]{L"5 jours travaillés",L"Moy./jour : 7:06:00",L"210 jours travaillés"};
         MetricCardLayout responsive;
         if (FAILED(measureResponsiveMetricCards(factory.Get(),totals,inputs,layout.innerWidth(),responsive)))
             throw std::runtime_error("Responsive overview cannot fit ordinary totals");
-        if ((width==1050 && responsive.columns!=4) || (width==720 && responsive.columns!=2))
-            throw std::runtime_error("Expected responsive four/two column layout");
+        if ((width==1050 && responsive.columns!=3) || (width==720 && responsive.columns!=3))
+            throw std::runtime_error("Expected three period summaries without a duplicate today card");
         if (width==1050 && DashboardLayout::overviewHeight(layout.innerWidth(),responsive.height(),700,responsive.columns)>522.1f)
             throw std::runtime_error("Ordinary overview should fit 1050x700 without vertical overflow");
+        // The daily total now shares its panel with the timeline. Even the
+        // largest supported duration must fit above the track at 100 DIPs.
+        const float timelineWidth = DashboardLayout::stackedCharts(layout.innerWidth())
+            ? layout.innerWidth() : (layout.innerWidth()-DashboardLayout::gap)/2;
+        for (auto duration : {std::chrono::seconds(0), std::chrono::seconds(24*3600), std::chrono::seconds::max()}) {
+            ComPtr<IDWriteTextLayout> daily;
+            if (FAILED(createMetricLayout(factory.Get(),compactDuration(duration),timelineWidth-32,64,&daily)))
+                throw std::runtime_error("Daily total overlaps the merged timeline");
+        }
         const std::wstring maxTotal[]{compactDuration(std::chrono::seconds::max())};
         const std::wstring maxInput[]{L"Clavier/souris : "+maxTotal[0]};
         MetricCardLayout exceptional;

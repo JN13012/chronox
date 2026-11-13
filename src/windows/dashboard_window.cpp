@@ -371,7 +371,6 @@ struct DashboardWindow::Impl {
     ComPtr<ID2D1SolidColorBrush> textBrush;
     ComPtr<ID2D1SolidColorBrush> mutedBrush;
     ComPtr<ID2D1SolidColorBrush> borderBrush;
-    ComPtr<ID2D1LinearGradientBrush> metalGradient;
     ComPtr<ID2D1LinearGradientBrush> canvasGradient;
     ComPtr<ID2D1LinearGradientBrush> sessionGradient;
     ComPtr<IDWriteTextFormat> brandFormat;
@@ -584,7 +583,6 @@ struct DashboardWindow::Impl {
                 D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, 1)),
                 collection.Get(), &brush), "Create dashboard gradient");
         };
-        gradient(ui::palette::steel, ui::palette::panel, metalGradient);
         gradient(ui::palette::sidebar, ui::palette::background, canvasGradient);
         gradient(ui::palette::cyan, ui::palette::accent, sessionGradient);
         checkHr(renderTarget->CreateSolidColorBrush(color(ui::palette::selection), &selectionBrush),
@@ -622,7 +620,6 @@ struct DashboardWindow::Impl {
         overviewSizingWidth=-1;
         textSelection.clearCache();
         renderTarget.Reset();
-        metalGradient.Reset();
         canvasGradient.Reset();
         sessionGradient.Reset();
         backgroundBrush.Reset();
@@ -672,7 +669,6 @@ struct DashboardWindow::Impl {
         const HRESULT result = renderTarget->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
             renderTarget.Reset();
-            metalGradient.Reset();
             canvasGradient.Reset();
             sessionGradient.Reset();
             backgroundBrush.Reset();
@@ -767,18 +763,15 @@ struct DashboardWindow::Impl {
         if (titaniumOverview()) { drawTitaniumCard(bounds,highlighted); return; }
 #endif
         const auto card = D2D1::RoundedRect(bounds, ui::space::cardRadius, ui::space::cardRadius);
-        metalGradient->SetStartPoint(D2D1::Point2F(bounds.left, bounds.top));
-        metalGradient->SetEndPoint(D2D1::Point2F(bounds.right, bounds.bottom));
-        renderTarget->FillRoundedRectangle(card, metalGradient.Get());
+        renderTarget->FillRoundedRectangle(card, panelBrush.Get());
+        borderBrush->SetOpacity(.65f);
+        renderTarget->DrawRoundedRectangle(card, borderBrush.Get(), .7f);
+        borderBrush->SetOpacity(1);
         if (highlighted) {
-            cyanBrush->SetOpacity(.12f);
-            renderTarget->DrawRoundedRectangle(card, cyanBrush.Get(), 5);
+            cyanBrush->SetOpacity(.65f);
+            renderTarget->DrawLine(D2D1::Point2F(bounds.left + 18, bounds.top),
+                                  D2D1::Point2F(bounds.left + 54, bounds.top), cyanBrush.Get(), 2);
             cyanBrush->SetOpacity(1);
-        }
-        renderTarget->DrawRoundedRectangle(card, highlighted ? cyanBrush.Get() : borderBrush.Get(), highlighted ? 1.4f : .8f);
-        if (highlighted) {
-            renderTarget->DrawLine(D2D1::Point2F(bounds.left + 18, bounds.bottom - 1),
-                                  D2D1::Point2F(bounds.right - 18, bounds.bottom - 1), cyanBrush.Get(), 2);
         }
     }
 
@@ -834,7 +827,7 @@ struct DashboardWindow::Impl {
         return std::to_wstring(days)+(days==1?L" jour travaillé":L" jours travaillés");
     }
     std::array<std::wstring,4> metricDetails() const {
-        return {L"Session du jour local", workedDaysLabel(snapshot.daysWithSession[1]),
+        return {L"", workedDaysLabel(snapshot.daysWithSession[1]),
             L"Moy./jour : "+(snapshot.daysWithSession[2] ? ui::compactDuration(snapshot.monthDailyAverage) : std::wstring(L"—")),
             workedDaysLabel(snapshot.daysWithSession[3])};
     }
@@ -850,10 +843,10 @@ struct DashboardWindow::Impl {
             snapshot.activityDurations[1],snapshot.activityDurations[2],snapshot.activityDurations[3]};
         if (width==overviewSizingWidth && durations==overviewSizingDurations &&
             snapshot.activityMeasured==overviewSizingMeasured && metricDetails()==overviewSizingDetails) return overviewSizing;
-        std::array<std::wstring,4> values,activity;
-        for (int i=0;i<4;++i) {
-            values[i]=ui::compactDuration(durations[i]);
-            activity[i]=metricDetails()[i];
+        std::array<std::wstring,3> values,activity;
+        for (int i=0;i<3;++i) {
+            values[i]=ui::compactDuration(durations[i+1]);
+            activity[i]=metricDetails()[i+1];
         }
         checkHr(ui::measureResponsiveMetricCards(writeFactory.Get(),values,activity,width,overviewSizing),
                 "Measure compact dashboard cards");
@@ -872,7 +865,7 @@ struct DashboardWindow::Impl {
         case ActivityState::Sleeping: activityLabel = L"Veille"; break;
         case ActivityState::Uncertain: activityLabel = L"Incertain"; break;
         }
-        const auto status = std::wstring(snapshot.activityDetectionEnabled ? activityLabel : L"Détection désactivée") + (snapshot.timeUncertain && snapshot.activityState!=ActivityState::Uncertain ? L" · Incertain" : L"") + L" · F1";
+        const auto status = std::wstring(snapshot.activityDetectionEnabled ? activityLabel : L"Détection désactivée") + (snapshot.timeUncertain && snapshot.activityState!=ActivityState::Uncertain ? L" · Incertain" : L"");
 
 #ifdef CHRONOX_TITANIUM_PROTOTYPE
         if (titaniumOverview()) { drawTitaniumStatus(status,left,right,top); return; }
@@ -888,47 +881,47 @@ struct DashboardWindow::Impl {
         const auto& sizing=overviewCardSizing(width);
         const int columns = sizing.columns;
         const float cardWidth = (width - gap * (columns - 1)) / columns;
-        drawText(L"TEMPS DE SESSION \u00b7 h:mm:ss",labelFormat.Get(),mutedBrush.Get(),
-                 D2D1::RectF(left,top,right,top+18));
-        const float metricsTop = top + ui::DashboardLayout::overviewIntroHeight;
-        const std::array<std::wstring, 4> labels{L"Aujourd'hui", L"Cette semaine",
-            L"Ce mois", L"Cette ann\u00e9e"};
-        const std::array<std::chrono::seconds, 4> values{snapshot.todayDuration,
-            snapshot.weekDuration, snapshot.monthDuration, snapshot.yearDuration};
-        for (int i = 0; i < 4; ++i) {
-            const float x = left + (i % columns) * (cardWidth + gap);
-            const float y = metricsTop + (i / columns) * (sizing.height() + gap);
-            drawCard(D2D1::RectF(x, y, x + cardWidth, y + sizing.height()), i == 0);
-            drawIcon(3, x+12, y+7, 20, cyanBrush.Get());
-            drawText(labels[i].c_str(), labelFormat.Get(), cyanBrush.Get(),
-                     D2D1::RectF(x + 40, y + 8, x + cardWidth - 12, y + 25));
-            drawMetric(ui::compactDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
-                x + cardWidth - 12, y + sizing.valueTop + sizing.valueHeight));
-            const std::wstring activityText = metricDetails()[i];
-            drawText(activityText.c_str(), activityFormat.Get(), cyanBrush.Get(),
-                     D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
-                                y + sizing.activityTop() + sizing.activityHeight));
-        }
-        const float chartsTop = metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap;
+        const float chartsTop = top + ui::DashboardLayout::overviewIntroHeight;
         const float chartHeight=ui::DashboardLayout::chartHeight(clientSize().height);
         const bool stacked=ui::DashboardLayout::stackedCharts(width);
         const float chartWidth = stacked?width:(width-gap)/2;
-        const auto timeline = D2D1::RectF(left,chartsTop,left+chartWidth,chartsTop+(stacked?84:chartHeight));
+        const auto timeline = D2D1::RectF(left,chartsTop,left+chartWidth,chartsTop+(stacked?150:chartHeight));
         const auto week = stacked?D2D1::RectF(left,timeline.bottom+gap,right,timeline.bottom+gap+chartHeight):
             D2D1::RectF(left+chartWidth+gap,chartsTop,right,chartsTop+chartHeight);
-        drawCard(timeline); drawCard(week); drawTimeline(timeline); drawWeekChart(week);
-        const auto sessions = D2D1::RectF(left,week.bottom+gap,right,bottom);
+        drawCard(timeline, true); drawCard(week); drawTimeline(timeline); drawWeekChart(week);
+        const float metricsTop = week.bottom + gap;
+        const std::array<std::wstring, 3> labels{L"Cette semaine",
+            L"Ce mois", L"Cette ann\u00e9e"};
+        const std::array<std::chrono::seconds, 3> values{
+            snapshot.weekDuration, snapshot.monthDuration, snapshot.yearDuration};
+        for (int i = 0; i < 3; ++i) {
+            const float x = left + (i % columns) * (cardWidth + gap);
+            const float y = metricsTop + (i / columns) * (sizing.height() + gap);
+            drawCard(D2D1::RectF(x, y, x + cardWidth, y + sizing.height()));
+            drawIcon(3, x+12, y+7, 16, mutedBrush.Get());
+            drawText(labels[i].c_str(), labelFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(x + 36, y + 8, x + cardWidth - 12, y + 25));
+            drawMetric(ui::compactDuration(values[i]), D2D1::RectF(x + 12, y + sizing.valueTop,
+                x + cardWidth - 12, y + sizing.valueTop + sizing.valueHeight));
+            const std::wstring activityText = metricDetails()[i+1];
+            drawText(activityText.c_str(), labelFormat.Get(), mutedBrush.Get(),
+                     D2D1::RectF(x + 12, y + sizing.activityTop(), x + cardWidth - 12,
+                                y + sizing.activityTop() + sizing.activityHeight));
+        }
+        const auto sessions = D2D1::RectF(left,metricsTop + ui::DashboardLayout::metricsHeight(width,sizing.height(),columns) + gap,right,bottom);
         drawCard(sessions); drawRecentSessions(sessions);
     }
 
     void drawTimeline(D2D1_RECT_F bounds) {
-        drawText(L"Session : frise du jour", labelFormat.Get(), textBrush.Get(),
+        drawText(L"Aujourd'hui", labelFormat.Get(), mutedBrush.Get(),
                  D2D1::RectF(bounds.left + 12.0f, bounds.top + 8.0f,
                              bounds.right - 10.0f, bounds.top + 25.0f));
-        const float left = bounds.left + 13.0f;
-        const float right = bounds.right - 13.0f;
-        const float trackTop = bounds.top + 32.0f;
-        const float trackBottom = trackTop + 18.0f;
+        drawMetric(ui::compactDuration(snapshot.todayDuration),
+                   D2D1::RectF(bounds.left+16, bounds.top+30, bounds.right-16, bounds.top+94));
+        const float left = bounds.left + 16.0f;
+        const float right = bounds.right - 16.0f;
+        const float trackTop = bounds.top + 100.0f;
+        const float trackBottom = trackTop + 10.0f;
         const auto track =
             D2D1::RoundedRect(D2D1::RectF(left, trackTop, right, trackBottom),
                               4.0f, 4.0f);
@@ -978,12 +971,6 @@ struct DashboardWindow::Impl {
             drawText(labels[index], compactNavFormat.Get(), mutedBrush.Get(),
                      D2D1::RectF(labelLeft, trackBottom + 6.0f, labelLeft + 24.0f,
                                  bounds.bottom - 3.0f));
-        }
-        if (snapshot.todayIntervals.empty()) {
-            drawText(L"Aucune p\u00e9riode comptabilis\u00e9e", compactNavFormat.Get(),
-                     mutedBrush.Get(),
-                     D2D1::RectF(left, bounds.top + 28.0f, right,
-                                 bounds.top + 42.0f));
         }
     }
 
@@ -1926,14 +1913,6 @@ struct DashboardWindow::Impl {
         canvasGradient->SetStartPoint(D2D1::Point2F(width, 0));
         canvasGradient->SetEndPoint(D2D1::Point2F(0, size.height));
         renderTarget->FillRectangle(D2D1::RectF(0, 0, width, size.height), canvasGradient.Get());
-        renderTarget->PushAxisAlignedClip(D2D1::RectF(0,0,width,size.height), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        borderBrush->SetOpacity(.09f);
-        for (int i=0; i<18; ++i) {
-            const float y = size.height - 20 - i * 3.f;
-            renderTarget->DrawLine(D2D1::Point2F(0,y),D2D1::Point2F(width,y-width),borderBrush.Get(),1);
-        }
-        borderBrush->SetOpacity(1);
-        renderTarget->PopAxisAlignedClip();
         renderTarget->DrawLine(D2D1::Point2F(width, 0.0f),
                                D2D1::Point2F(width, size.height),
                                borderBrush.Get(), 1.0f);
@@ -2104,9 +2083,6 @@ struct DashboardWindow::Impl {
         }
 
         const wchar_t* title = PageLabels[static_cast<std::size_t>(activePage)];
-        drawText(L"CHRONOX  /  TABLEAU DE BORD", compactNavFormat.Get(),
-                 mutedBrush.Get(),
-                 D2D1::RectF(contentLeft, 28.0f, contentRight, 48.0f));
 #ifdef CHRONOX_TITANIUM_PROTOTYPE
         if (titaniumOverview()) drawText(L"CHRONOX  /  TABLEAU DE BORD",titanium.body.Get(),mutedBrush.Get(),D2D1::RectF(contentLeft,24,contentLeft+230,44));
 #endif
@@ -2118,7 +2094,7 @@ struct DashboardWindow::Impl {
         const auto separator =
             D2D1::RectF(contentLeft, 112.0f, contentRight, 113.0f);
         renderTarget->FillRectangle(separator, borderBrush.Get());
-        renderTarget->FillRectangle(D2D1::RectF(contentLeft,112,contentLeft+52,114),cyanBrush.Get());
+
 
         layoutRangeControls(activePage==DashboardPage::History,contentLeft+14,contentRight-14);
         const float panelTop = activePage==DashboardPage::Overview?126.0f:activePage==DashboardPage::History?186.0f:142.0f;
@@ -2250,7 +2226,6 @@ struct DashboardWindow::Impl {
         const HRESULT result = renderTarget->Resize(size);
         if (result == D2DERR_RECREATE_TARGET) {
             renderTarget.Reset();
-            metalGradient.Reset();
             canvasGradient.Reset();
             sessionGradient.Reset();
             backgroundBrush.Reset();

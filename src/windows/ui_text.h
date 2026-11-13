@@ -83,7 +83,7 @@ inline HRESULT measureResponsiveMetricCards(IDWriteFactory* factory,
             (available-DashboardLayout::gap*(columns-1))/columns-24,result);
     };
     HRESULT hr=measure();
-    if (hr==E_BOUNDS && columns==4) { columns=2; hr=measure(); }
+    while (hr==E_BOUNDS && columns>1) { --columns; hr=measure(); }
     if (SUCCEEDED(hr)) result.columns=columns;
     return hr;
 }

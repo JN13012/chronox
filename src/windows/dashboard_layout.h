@@ -25,20 +25,20 @@ struct DashboardLayout {
     constexpr float innerWidth() const { return right() - left() - 28; }
     constexpr float statusLeft() const { return left() + 180; }
     constexpr float statusWidth() const { return right() - statusLeft(); }
-    static constexpr int metricColumns(float available) { return available >= 680 ? 4 : 2; }
-    static constexpr float metricHeight = MetricCardLayout{}.height(), gap = 10;
-    static constexpr float overviewIntroHeight = 24;
+    static constexpr int metricColumns(float available) { return available >= 480 ? 3 : 1; }
+    static constexpr float metricHeight = MetricCardLayout{}.height(), gap = 14;
+    static constexpr float overviewIntroHeight = 0;
     static constexpr bool stackedCharts(float available) { return available < 600; }
-    static constexpr float chartHeight(float viewportHeight) { return std::clamp(viewportHeight*.2f,120.f,160.f); }
+    static constexpr float chartHeight(float viewportHeight) { return std::clamp(viewportHeight*.22f,150.f,180.f); }
     static constexpr float recentHeight(float viewportHeight) { return std::clamp(viewportHeight*.34f,216.f,300.f); }
     static constexpr float metricsHeight(float available, float cardHeight = metricHeight, int columns = 0) {
         if (!columns) columns=metricColumns(available);
-        return cardHeight * (4 / columns) + gap * (4 / columns - 1);
+        return cardHeight * ((3 + columns - 1) / columns) + gap * ((3 + columns - 1) / columns - 1);
     }
     static constexpr float overviewHeight(float available, float cardHeight = metricHeight,
                                           float viewportHeight = initialHeight, int columns = 0) {
         return overviewIntroHeight + metricsHeight(available,cardHeight,columns) + gap +
-            (stackedCharts(available)?84+gap:0) + chartHeight(viewportHeight) + gap + recentHeight(viewportHeight);
+            (stackedCharts(available)?150+gap:0) + chartHeight(viewportHeight) + gap + recentHeight(viewportHeight);
     }
     static constexpr float historyHeight = 770;
 };

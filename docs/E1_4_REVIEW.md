@@ -102,3 +102,11 @@ L'encart clavier/souris a été supprimé de la vue générale ; sa place agrand
 Cause de l'encodage : fichiers sources UTF-8 sans BOM interprétés selon la page de codes locale de MSVC. Les 66 fichiers sources contrôlés étaient valides en UTF-8 ; l'ancien exécutable contenait réellement la chaîne corrompue du titre. L'option /utf-8 est désormais imposée pour C/C++ sous MSVC. Un test compare accents et ponctuation compilés à leurs codes Unicode explicites, et vérifie aussi l'encodage UTF-8 des chaînes étroites. Le nouveau binaire contient le titre correct et plus sa variante corrompue.
 
 Validation : Release PASS, 28/28 CTest PASS (15,64 s), géométrie du curseur et glissement jusqu'à la dernière ligne puis retour clavier en haut PASS dans le banc à 1050 × 700 et 720 × 520. Journaux et métriques : build/review-e14/premium-scroll-*. Capture Windows encore indisponible ; appréciation visuelle à confirmer dans le banc.
+
+## Proposition graphite — total du jour intégré à la frise
+
+La carte Aujourd'hui et le sous-titre Session du jour local sont supprimés. Un seul panneau Aujourd'hui réunit le total exact (secondes conservées) et les portions de la journée. Les trois synthèses restantes sont semaine, mois, année. La grille mesure les vrais textes et revient à deux puis une colonne pour les valeurs exceptionnelles ; le calcul de hauteur utilise le nombre réel de lignes, y compris une dernière ligne incomplète.
+
+Style : fond graphite, surfaces unies, contours de 0,7 DIP atténués, angles de 12 DIP, espacement de 14 DIP, libellés secondaires neutres et repère cyan limité au panneau du jour. Retrait du dégradé métallique, du halo des cartes et des rayures de la navigation. La frise est amincie à 10 DIP. La navigation et les autres pages reprennent les surfaces sobres.
+
+Validation : Release PASS ; 28/28 CTest PASS (13,93 s). Mesures DirectWrite des durées du jour jusqu'à seconds::max(), de 640 à 1600 DIP, sans recouvrir la frise. Vue ordinaire 1050 × 700 dans la hauteur disponible. Banc natif 1050 × 700 et 720 × 520 : glissement, clavier, absence de déplacement du parent, filtre inclusif et cache de dessin PASS. Résultats sous build/review-e14/graphite-*. Capture visuelle NON TESTÉE : service Computer Use natif indisponible. La proposition est disponible dans le banc de présentation avec données fictives, sans base ni préférences.

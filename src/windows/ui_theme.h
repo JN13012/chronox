@@ -7,21 +7,21 @@ namespace chronox::ui {
 
 struct Rgb { unsigned char r, g, b; };
 namespace palette {
-inline constexpr Rgb background{0x09, 0x11, 0x19};
-inline constexpr Rgb sidebar{0x10, 0x1b, 0x26};
-inline constexpr Rgb panel{0x17, 0x23, 0x2e};
-inline constexpr Rgb hover{0x26, 0x35, 0x43};
+inline constexpr Rgb background{0x0d, 0x12, 0x19};
+inline constexpr Rgb sidebar{0x10, 0x17, 0x20};
+inline constexpr Rgb panel{0x16, 0x1f, 0x2a};
+inline constexpr Rgb hover{0x1e, 0x2b, 0x39};
 inline constexpr Rgb steel{0x32, 0x43, 0x52};
 inline constexpr Rgb accent{0x00, 0x85, 0xff};
 inline constexpr Rgb selection{0x1b, 0x4f, 0x86};
 inline constexpr Rgb cyan{0x42, 0xe4, 0xf5};
 inline constexpr Rgb text{0xf1, 0xf5, 0xfa};
 inline constexpr Rgb muted{0xb2, 0xc5, 0xd4};
-inline constexpr Rgb border{0x70, 0x87, 0x98};
+inline constexpr Rgb border{0x35, 0x46, 0x58};
 }
 namespace space {
 inline constexpr float xs = 4, sm = 8, md = 12, lg = 16, xl = 24;
-inline constexpr float cardRadius = 10, panelRadius = 14;
+inline constexpr float cardRadius = 12, panelRadius = 14;
 }
 // DIPs; weights map directly to DirectWrite's normal/medium/semibold scale.
 struct TextStyle { float size; int weight; };
